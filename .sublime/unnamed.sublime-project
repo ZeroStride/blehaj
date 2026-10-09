@@ -1,0 +1,13 @@
+{
+    "folders": [
+        {
+            "folder_exclude_patterns": ["target", "artifacts"],
+            "binary_file_patterns": ["*/target/*", "*/artifacts/*"],
+            "path": ".."
+        }
+    ],
+    "build_systems": [],
+    "settings": {
+        "rust_syntax_checking_method": "clippy",
+    },
+}

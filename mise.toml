@@ -13,7 +13,7 @@ depends = ["lint", "test", "deny"]
 description = "Build with cross"
 run = [
   "cross build --all --release --artifact-dir artifacts",
-  "scp artifacts/bee-configured {{ vars.deploy_target }}:~/"
+  "(cd deploy ; mise deploy)"
 ]
 
 [tasks.deny]

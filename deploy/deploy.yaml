@@ -1,0 +1,69 @@
+---
+- hosts: all
+  gather_facts: false
+  tasks:
+  - block:
+      - name: make /opt/{{ project_name }}/lib
+        file: 
+          path: "/opt/{{ project_name }}/lib"
+          state: directory
+      - name: make /opt/{{ project_name }}/bin
+        file: 
+          path: "/opt/{{ project_name }}/bin"
+          state: directory
+      - name: copy service description to /opt/{{ project_name }}/lib
+        ansible.builtin.copy:
+          src: opt/project/lib/project.service
+          dest: /opt/{{ project_name }}/lib/{{ project_name }}.service
+          mode: 0644
+          group: netdev
+        notify:
+          - daemon reload
+      - ansible.builtin.meta: flush_handlers
+      - name: create symlink /opt/{{ project_name }}/lib/{{ project_name }}.service -> /etc/systemd/system/{{ project_name }}.service
+        ansible.builtin.file:
+          src: /opt/{{ project_name }}/lib/{{ project_name }}.service
+          dest: /etc/systemd/system/{{ project_name }}.service
+          state: link
+      - name: check if binary has changed
+        ansible.builtin.copy:
+          dest: /opt/{{ project_name }}/bin
+          src: ../artifacts/{{ project_name }}
+          mode: 0755
+          group: netdev
+        check_mode: true
+        register: check_copy
+      - name: stop service {{ project_name }}
+        ignore_errors: true
+        ansible.builtin.service:
+          name: "{{ project_name }}"
+          state: stopped
+        when: check_copy.changed
+      - name: copy binary to /opt/{{ project_name }}/bin
+        ansible.builtin.copy:
+          dest: /opt/{{ project_name }}/bin
+          src: ../artifacts/{{ project_name }}
+          mode: 0755
+          group: netdev
+        when: check_copy.changed
+      - name: create symlink /opt/{{ project_name }}/bin/{{ project_name }} -> /usr/local/bin/{{ project_name }}
+        ansible.builtin.file:
+          src: /opt/{{ project_name }}/bin/{{ project_name }}
+          dest: /usr/local/bin/{{ project_name }}
+          state: link
+      - name: start & enable service {{ project_name }}
+        ansible.builtin.service:
+          name: "{{ project_name }}"
+          daemon_reload: true
+          enabled: true
+          state: started
+        when: check_copy.changed and ((skip_start is undefined) or (skip_start | bool == False))
+    become: yes
+    become_method: sudo
+
+  handlers:
+    - name: daemon reload
+      ansible.builtin.service:
+        daemon_reload: true
+      become: yes
+      become_method: sudo

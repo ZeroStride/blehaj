@@ -8,3 +8,10 @@ publish = false
 clap = { version = "4.6.7", features = ["derive"] }
 miette = { version = "7.6.0", features = ["fancy"] }
 serde = { version = "1.0.229", features = ["derive"] }
+tracing = { version = "0.1.44", features = ["attributes"] }
+tracing-journald = "0.3.2"
+tracing-subscriber = { version = "0.3.23", features = ["json"] }
+
+[lints.clippy]
+print_stdout = "deny"
+print_stderr = "deny"

@@ -1,0 +1,44 @@
+---
+- hosts: all
+  gather_facts: false
+  tasks:
+  - block:
+      # Set bluetooth mode to low energy only
+      - name: set 'ControllerMode = le' in /etc/bluetooth/main.conf
+        ansible.builtin.lineinfile:
+          path: /etc/bluetooth/main.conf
+          regexp: '^#?\s*ControllerMode'
+          line: 'ControllerMode = le'
+          state: present
+        notify:
+          - restart bluetooth
+
+      # Unblock bluetooth
+      - name: get rfkill status
+        ansible.utils.cli_parse:
+          command: rfkill --json
+          parser:
+            name: ansible.utils.json
+        register: rfkill
+      - name: unblock bluetooth
+        ansible.builtin.command: rfkill unblock bluetooth
+        when: rfkill.parsed.rfkilldevices | to_json | from_json | selectattr('type', 'eq', 'bluetooth') | selectattr('soft', 'eq', 'blocked') | length > 0
+        notify:
+          - restart bluetooth
+    become: yes
+    become_method: sudo
+
+  handlers:
+    - name: restart bluetooth
+      ansible.builtin.service:
+        name: bluetooth
+        state: restarted
+        enabled: true
+      become: yes
+      become_method: sudo
+    - name: restart polkit
+      ansible.builtin.service:
+        name: polkit
+        state: restarted
+      become: yes
+      become_method: sudo

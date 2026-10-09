@@ -1,0 +1,21 @@
+[Unit]
+Description=Unnamed Network Configuration Automation Project
+After=multi-user.target network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/unnamed wlan0
+Restart=on-failure
+
+# Dynamic User
+DynamicUser=yes
+Group=netdev
+ConfigurationDirectory=unnamed
+ConfigurationDirectoryMode=0555
+
+RestrictRealtime=true
+MemoryDenyWriteExecute=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

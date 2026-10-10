@@ -26,7 +26,7 @@ pub struct Configuration {
     pub json: bool,
     pub bluetooth_adapter: BluetoothAdapter,
     pub network_interface: String,
-    exit_after_configuration: bool,
+    pub exit_after_configuration: bool,
 }
 
 impl Configuration {
@@ -52,10 +52,6 @@ impl Configuration {
             network_interface: cli.interface,
             exit_after_configuration: cli.configuration,
         }
-    }
-
-    pub fn exit_after_configuration(&self) -> bool {
-        self.exit_after_configuration
     }
 }
 

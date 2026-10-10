@@ -27,6 +27,7 @@ pub struct Configuration {
     pub bluetooth_adapter: BluetoothAdapter,
     pub network_interface: String,
     pub exit_after_configuration: bool,
+    pub systemd_launched: bool,
 }
 
 impl Configuration {
@@ -51,6 +52,7 @@ impl Configuration {
             },
             network_interface: cli.interface,
             exit_after_configuration: cli.configuration,
+            systemd_launched: std::os::unix::process::parent_id() == 1,
         }
     }
 }

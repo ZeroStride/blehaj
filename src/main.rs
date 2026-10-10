@@ -1,7 +1,9 @@
-use clap::crate_version;
+use std::io::IsTerminal;
+
+use clap::{crate_name, crate_version};
 use miette::IntoDiagnostic;
 use tracing::info;
-use tracing_subscriber::prelude::*;
+use tracing_subscriber::{filter::EnvFilter, prelude::*};
 use zbus::Connection;
 
 mod configuration;
@@ -16,19 +18,13 @@ async fn main() -> miette::Result<()> {
 
     if configuration.json {
         miette::set_hook(Box::new(|_| Box::new(miette::JSONReportHandler)))?;
-    } else {
+    } else if std::io::stdin().is_terminal() {
         miette::set_hook(Box::new(|_| {
             Box::new(miette::GraphicalReportHandler::default())
         }))?;
+    } else {
+        miette::set_hook(Box::new(|_| Box::new(miette::DebugReportHandler)))?;
     }
-    // The GraphicalReportHandler seems to actually look fine in journalctl
-    // } else if std::io::stdin().is_terminal() {
-    //     miette::set_hook(Box::new(|_| {
-    //         Box::new(miette::GraphicalReportHandler::default())
-    //     }))?;
-    // } else {
-    //     miette::set_hook(Box::new(|_| Box::new(miette::DebugReportHandler)))?;
-    // }
 
     #[allow(clippy::print_stdout)]
     if configuration.exit_after_configuration {
@@ -41,33 +37,35 @@ async fn main() -> miette::Result<()> {
     }
 
     // Tracing
+    let output_layer = if configuration.json {
+        tracing_subscriber::fmt::layer().json().boxed()
+    } else if configuration.systemd_launched
+        && let Ok(journald_layer) = tracing_journald::layer()
     {
-        let stdout_layer = if configuration.json {
-            tracing_subscriber::fmt::layer().json().boxed()
-        } else {
-            tracing_subscriber::fmt::layer().compact().boxed()
-        };
+        journald_layer
+            .with_custom_fields([(
+                "UN_CONFIGURE_INTERFACE",
+                configuration.network_interface.clone(),
+            )])
+            .boxed()
+    } else {
+        // Not sure if I want to test for is_terminal here or just assume
+        // if std::io::stdin().is_terminal() ?
+        tracing_subscriber::fmt::layer().compact().boxed()
+    };
 
-        let journald_layer = tracing_journald::layer()
-            .map(|layer| {
-                layer.with_custom_fields([(
-                    "UN_CONFIGURE_INTERFACE",
-                    configuration.network_interface.clone(),
-                )])
-            })
-            .ok();
-
-        tracing_subscriber::registry()
-            .with(journald_layer)
-            .with(stdout_layer)
-            .init()
-    }
+    tracing_subscriber::registry()
+        .with(
+            output_layer.with_filter(
+                EnvFilter::try_from_default_env()
+                    .unwrap_or(EnvFilter::new(format!("warn,{}=trace", crate_name!()))),
+            ),
+        )
+        .init();
 
     info!(version = crate_version!(), ?configuration, "starting");
 
-    // Get interface to configure, will error if not found
     info!(interface = %configuration.network_interface, "connecting to D-Bus service org.freedesktop.NetworkManager");
-    // DynamicUser
     let connection = Connection::system()
         .await
         .map_err(|e| {

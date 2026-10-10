@@ -5,6 +5,7 @@ After=multi-user.target network.target
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/unnamed wlan0
+Environment="RUST_LOG=warn,unnamed=debug"
 Restart=on-failure
 
 # Dynamic User causes an I/O error

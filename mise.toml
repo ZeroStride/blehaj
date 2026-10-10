@@ -36,3 +36,11 @@ run = [
   # "cargo test --doc",
 ]
 wait_for = ["lint"]
+
+[tasks.rr]
+description = "Copy & Run using systemd-run"
+run = [
+  "cross build --all --release --artifact-dir artifacts",
+  "scp artifacts/unnamed {{ vars.destination_user_at_host }}:~/",
+  "ssh {{ vars.destination_user_at_host }} -t 'systemd-run -p Group=netdev -p ConfigurationDirectory=unnamed -p ConfigurationDirectoryMode=0555 -p RestrictRealtime=yes -p MemoryDenyWriteExecute=yes --pipe --pty /opt/unnamed/bin/unnamed wlan0'"
+]

@@ -7,15 +7,20 @@ Type=simple
 ExecStart=/usr/local/bin/unnamed wlan0
 Restart=on-failure
 
-# Dynamic User
-DynamicUser=yes
+# Dynamic User causes an I/O error
+# DynamicUser=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+RemoveIPC=yes
+
 Group=netdev
 ConfigurationDirectory=unnamed
 ConfigurationDirectoryMode=0555
 
-RestrictRealtime=true
-MemoryDenyWriteExecute=true
-NoNewPrivileges=true
+RestrictRealtime=yes
+MemoryDenyWriteExecute=yes
+NoNewPrivileges=yes
 
 [Install]
 WantedBy=multi-user.target

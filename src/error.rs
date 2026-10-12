@@ -1,6 +1,8 @@
 use miette::Diagnostic;
 use thiserror::Error;
 
+use crate::network_manager;
+
 #[allow(clippy::enum_variant_names)]
 #[derive(Diagnostic, Debug, Error)]
 pub enum Error {
@@ -19,7 +21,11 @@ pub enum Error {
     },
 
     #[error(transparent)]
+    NetworkManager(#[from] network_manager::Error),
+
+    #[error(transparent)]
     Zbus(#[from] zbus::Error),
+
     #[error(transparent)]
     IOError(#[from] std::io::Error),
 }

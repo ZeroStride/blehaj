@@ -4,6 +4,7 @@ cargo-binstall = "latest"
 "cargo:cargo-deny" = "latest"
 "cargo:cargo-fmt-toml" = "latest"
 "cargo:cargo-nextest" = "latest"
+"cargo:systemd-lsp" = { version = "latest", lazy = true }
 rust = { version = "nightly-2026-10-01", profile = "minimal", components = "rustfmt,clippy" }
 
 [tasks.ci]

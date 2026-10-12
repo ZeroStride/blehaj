@@ -4,7 +4,8 @@ use clap::{crate_name, crate_version};
 use miette::IntoDiagnostic;
 use tracing::info;
 use tracing_subscriber::{filter::EnvFilter, prelude::*};
-use zbus::Connection;
+
+use crate::network_manager::NetworkManager;
 
 mod configuration;
 mod error;
@@ -65,48 +66,56 @@ async fn main() -> miette::Result<()> {
 
     info!(version = crate_version!(), ?configuration, "starting");
 
+    //
+    // Establish D-Bus connection, catch some errors I've run into
+    //
     info!(interface = %configuration.network_interface, "connecting to D-Bus service org.freedesktop.NetworkManager");
-    let connection = Connection::system()
-        .await
-        .map_err(|e| {
-            if let zbus::Error::InputOutput(ref e) = e
-                && e.to_string() == "failed to read from socket" {
-                    let e = e.clone();
-                    // Todo - Could try reading the .service file and see if this is the case?
-                    return crate::error::Error::Actionable {
+    let network_manager = NetworkManager::new().await.map_err(|e| {
+        // Shuld check e.to_string() == "failed to read from socket"
+        if let network_manager::Error::ZbusSystemConnection { source: e } = e {
+            return crate::error::Error::Actionable {
                         description: "failed to establish D-Bus connection".to_string(),
                         code: None,
                         advice: Some("If the systemd service unit is setting `DynamicUser=yes` it will cause an issue during the `NEGOTIATE_UNIX_FD` step.".to_string()),
                         source: Some(Box::new(e)),
                     }
-                }
-            e.into()
-        })?;
+        }
+        e.into()
+    })?;
 
-    let network_manager = network_manager::NetworkManagerProxy::new(&connection)
-        .await
-        .into_diagnostic()?;
-    let network_interface_path = network_manager
-        .get_device_by_ip_iface(&configuration.network_interface)
+    let network_device = network_manager
+        .device(configuration.network_interface)
         .await
         .map_err(|e| {
-            if let zbus::Error::MethodError(ref error_name, ..) = e
-                && *error_name == "org.freedesktop.NetworkManager.UnknownDevice"
+            if let network_manager::Error::MethodError(
+                network_manager::MethodError::UnknownDevice(ref name),
+            ) = e
             {
                 return crate::error::Error::Actionable {
-                    description: format!(
-                        "Interface '{}' not found.",
-                        configuration.network_interface
-                    ),
+                    description: format!("Interface '{}' not found.", name),
                     code: None,
                     advice: Some(
                         "use 'nmcli device status' to list the available devices".to_string(),
                     ),
-                    source: Some(Box::new(e.clone())),
+                    source: Some(Box::new(e)),
                 };
             }
             e.into()
         })?;
+
+    // const NM_CHECKPOINT_CREATE_FLAG_DESTROY_ALL: u32 = 0x01;
+    // const NM_CHECKPOINT_CREATE_FLAG_DELETE_NEW_CONNECTIONS: u32 = 0x02;
+
+    // let binding = [&(*network_interface_path)];
+    // let device_checkpoint = network_manager
+    //     .checkpoint_create(
+    //         &binding,
+    //         0,
+    //         NM_CHECKPOINT_CREATE_FLAG_DESTROY_ALL
+    //             | NM_CHECKPOINT_CREATE_FLAG_DELETE_NEW_CONNECTIONS,
+    //     )
+    //     .await
+    //     .into_diagnostic()?;
 
     Ok(())
 }

@@ -1,4 +1,4 @@
-use std::io::IsTerminal;
+use std::{io::IsTerminal, time::Duration};
 
 use clap::{crate_name, crate_version};
 use miette::IntoDiagnostic;
@@ -103,19 +103,16 @@ async fn main() -> miette::Result<()> {
             e.into()
         })?;
 
-    // const NM_CHECKPOINT_CREATE_FLAG_DESTROY_ALL: u32 = 0x01;
-    // const NM_CHECKPOINT_CREATE_FLAG_DELETE_NEW_CONNECTIONS: u32 = 0x02;
+    let connectivity = network_manager.connectivity().await.into_diagnostic()?;
+    info!(%connectivity, "current network connectivity");
 
-    // let binding = [&(*network_interface_path)];
-    // let device_checkpoint = network_manager
-    //     .checkpoint_create(
-    //         &binding,
-    //         0,
-    //         NM_CHECKPOINT_CREATE_FLAG_DESTROY_ALL
-    //             | NM_CHECKPOINT_CREATE_FLAG_DELETE_NEW_CONNECTIONS,
-    //     )
-    //     .await
-    //     .into_diagnostic()?;
-
+    let checkpoint = network_manager
+        .build_checkpoint()
+        .for_device(&network_device)
+        .with_rollback_timeout(Duration::from_secs(10))
+        .destroy_all_on_create()
+        .build()
+        .await
+        .into_diagnostic()?;
     Ok(())
 }

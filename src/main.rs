@@ -2,7 +2,12 @@ use std::{io::IsTerminal, time::Duration};
 
 use clap::{crate_name, crate_version};
 use miette::IntoDiagnostic;
-use tracing::info;
+use tokio::{
+    signal::unix::{SignalKind, signal},
+    task::JoinSet,
+};
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, info};
 use tracing_subscriber::{filter::EnvFilter, prelude::*};
 
 use crate::network_manager::NetworkManager;
@@ -106,13 +111,69 @@ async fn main() -> miette::Result<()> {
     let connectivity = network_manager.connectivity().await.into_diagnostic()?;
     info!(%connectivity, "current network connectivity");
 
-    let checkpoint = network_manager
-        .build_checkpoint()
-        .for_device(&network_device)
-        .with_rollback_timeout(Duration::from_secs(10))
-        .destroy_all_on_create()
-        .build()
-        .await
-        .into_diagnostic()?;
+    //
+    // Listen for signals
+    //
+    let cancelation_token = CancellationToken::new();
+    {
+        let cancelation_token = cancelation_token.clone();
+        let mut sigterm = signal(SignalKind::terminate()).into_diagnostic()?;
+        tokio::spawn(async move {
+            let shutdown = |signal| {
+                info!(%signal, "shutting down...");
+                cancelation_token.cancel();
+            };
+            tokio::select! {
+                _ = cancelation_token.cancelled() => {}
+                _ = tokio::signal::ctrl_c() => {
+                    shutdown("SIGINT");
+                }
+                _ = sigterm.recv() => {
+                    shutdown("SIGTERM");
+                }
+            }
+        });
+    }
+
+    //
+    // So we either wait on a connectivity lost signal or we make it so the service
+    // is only started, by a watchdog or something, when connectivity is lost.
+    //
+
+    //
+    // Start up the designated configuration mode(s), and wait to receive a configuration
+    //
+    let mut configuration_tasks: JoinSet<Result<Option<()>, std::io::Error>> = JoinSet::new();
+    // let configuration_modes = vec![];
+
+    loop {
+        match configuration_tasks.join_next().await {
+            None => break,
+            Some(Err(e)) => {
+                error!(%e, "error while joining configuration task");
+            }
+            Some(Ok(Err(e))) => {
+                error!(%e, "error from configuration task");
+            }
+            Some(Ok(Ok(None))) => {
+                debug!("task completed without returning configuration");
+            }
+            Some(Ok(Ok(Some(_configuration)))) => {
+                let _checkpoint = network_manager
+                    .build_checkpoint()
+                    .for_device(&network_device)
+                    .with_rollback_timeout(Duration::from_secs(15)) // Todo - Configurable delay
+                    .destroy_all_on_create()
+                    .build()
+                    .await
+                    .into_diagnostic()?;
+
+                // Todo - Apply configuration
+
+                // Todo - Validate with backend, then destroy checkpoint upon success
+            }
+        }
+    }
+
     Ok(())
 }

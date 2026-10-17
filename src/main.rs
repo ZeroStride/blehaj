@@ -112,6 +112,30 @@ async fn main() -> miette::Result<()> {
     info!(%connectivity, "current network connectivity");
 
     //
+    // Initialize configuration mode(s)
+    //
+    // Do the stuff that can fail and would make the service unable to continue
+    // to function, as configured, if it does fail.
+    //
+
+    // Todo - This should actually be configurable
+    // let configuration_modes = vec![];
+    info!("initializing bluetooth session");
+    let session = bluer::Session::new().await.into_diagnostic()?;
+    info!(?session, "getting bluetooth adapter");
+    let adapter = match configuration.bluetooth_adapter {
+        configuration::BluetoothAdapter::Default => {
+            session.default_adapter().await.into_diagnostic()?
+        }
+        configuration::BluetoothAdapter::Named { name } => {
+            session.adapter(&name).into_diagnostic()?
+        }
+        configuration::BluetoothAdapter::All => todo!(),
+    };
+    info!(?adapter, "power on");
+    adapter.set_powered(true).await.into_diagnostic()?;
+
+    //
     // Listen for signals
     //
     let cancelation_token = CancellationToken::new();
@@ -144,7 +168,6 @@ async fn main() -> miette::Result<()> {
     // Start up the designated configuration mode(s), and wait to receive a configuration
     //
     let mut configuration_tasks: JoinSet<Result<Option<()>, std::io::Error>> = JoinSet::new();
-    // let configuration_modes = vec![];
 
     loop {
         match configuration_tasks.join_next().await {

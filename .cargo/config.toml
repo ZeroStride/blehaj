@@ -1,5 +1,8 @@
 [build]
 # rustflags = ["--cfg", "tracing_unstable", "--cfg", "tokio_unstable"]
 
+[target.aarch64-unknown-linux-gnu]
+# runner = "" # Todo - Could automate scp and whatnot
+
 [unstable]
 unstable-options = true

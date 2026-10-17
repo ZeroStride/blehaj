@@ -1,0 +1,177 @@
+use ble_peripheral_rust::{
+    Peripheral, PeripheralImpl,
+    gatt::{
+        characteristic::Characteristic,
+        descriptor::Descriptor,
+        peripheral_event::{
+            PeripheralEvent, PeripheralRequest, ReadRequestResponse, RequestResponse,
+            WriteRequestResponse,
+        },
+        properties::{AttributePermission, CharacteristicProperty},
+        service::Service,
+    },
+    uuid::ShortUuid,
+};
+use tokio::sync::{mpsc, mpsc::Receiver};
+use tokio_util::{future::FutureExt, sync::CancellationToken};
+use tracing::{debug, error, info, instrument};
+use uuid::Uuid;
+
+use crate::configuration::{self};
+
+pub struct BlePeripheralConfigurationSource {
+    // session: bluer::Session,
+    // adapter: bluer::Adapter,
+    peripheral: Peripheral,
+    event_rx: Receiver<PeripheralEvent>,
+    service: Service,
+}
+
+impl BlePeripheralConfigurationSource {
+    pub async fn new_from_configuration(
+        configuration: &configuration::Configuration,
+    ) -> Result<Self, ble_peripheral_rust::error::Error> {
+        //bluer::Error> {
+        // info!("initializing bluetooth session");
+        // let session = bluer::Session::new().await?;
+        // info!(?session, "getting bluetooth adapter");
+        // let adapter = match configuration.bluetooth_adapter {
+        //     configuration::BluetoothAdapter::Default => session.default_adapter().await?,
+        //     configuration::BluetoothAdapter::Named { ref name } => session.adapter(name)?,
+        //     configuration::BluetoothAdapter::All => todo!(),
+        // };
+        // info!(?adapter, "power on");
+        // adapter.set_powered(true).await?;
+
+        // Ok(BlePeripheralConfigurationSource { session, adapter })
+
+        let char_uuid = Uuid::from_short(0x2A3D_u16);
+
+        info!("initializing bluetooth peripheral");
+        let (event_tx, event_rx) = mpsc::channel::<PeripheralEvent>(256);
+        let peripheral = Peripheral::new(event_tx).await?;
+        Ok(BlePeripheralConfigurationSource {
+            peripheral,
+            event_rx,
+            service: Service {
+                uuid: configuration.bluetooth_service_uuid,
+                primary: true,
+                characteristics: vec![Characteristic {
+                    uuid: char_uuid,
+                    properties: vec![
+                        CharacteristicProperty::Read,
+                        CharacteristicProperty::Write,
+                        CharacteristicProperty::Notify,
+                    ],
+                    permissions: vec![
+                        AttributePermission::Readable,
+                        AttributePermission::Writeable,
+                    ],
+                    value: None,
+                    ..Default::default()
+                }],
+            },
+        })
+    }
+    #[instrument(skip(self))]
+    async fn state_update(&self, is_powered: bool) {
+        debug!(%is_powered, "state update");
+    }
+
+    #[instrument(skip(self))]
+    async fn read_request(&self, request: PeripheralRequest, offset: usize) -> ReadRequestResponse {
+        ReadRequestResponse {
+            value: String::from("ok").into(),
+            response: RequestResponse::Success,
+        }
+    }
+
+    #[instrument(skip(self))]
+    async fn write_request(
+        &self,
+        request: PeripheralRequest,
+        value: Vec<u8>,
+        offset: usize,
+    ) -> WriteRequestResponse {
+        WriteRequestResponse {
+            response: RequestResponse::Success,
+        }
+    }
+
+    #[instrument(skip(self))]
+    async fn subscribed(&self, request: PeripheralRequest) {
+        debug!(?request, "subscribed");
+    }
+
+    #[instrument(skip(self))]
+    async fn unsubscribed(&self, request: PeripheralRequest) {
+        debug!(?request, "unsubscribed");
+    }
+
+    #[instrument(skip(self))]
+    pub async fn proc(
+        mut self,
+        cancellation_token: CancellationToken,
+    ) -> Result<Option<Vec<u8>>, ble_peripheral_rust::error::Error> {
+        debug!("powering on peripheral");
+        while !self.peripheral.is_powered().await? {}
+
+        debug!(?self.service, "adding service");
+        self.peripheral.add_service(&self.service).await?;
+
+        info!(%self.service.uuid, "advertising service");
+        self.peripheral
+            .start_advertising("unnamed-todo-add-setting", &[self.service.uuid])
+            .await?;
+
+        while let Some(event) = self
+            .event_rx
+            .recv()
+            .with_cancellation_token(&cancellation_token)
+            .await
+        {
+            match event {
+                None => break,
+                Some(PeripheralEvent::StateUpdate { is_powered }) => {
+                    self.state_update(is_powered).await
+                }
+                Some(PeripheralEvent::ReadRequest {
+                    request,
+                    offset,
+                    responder,
+                }) => {
+                    if responder
+                        .send(self.read_request(request, offset as usize).await)
+                        .is_err()
+                    {
+                        error!("error sending read_request response, receiver dropped");
+                    }
+                }
+                Some(PeripheralEvent::WriteRequest {
+                    request,
+                    value,
+                    offset,
+                    responder,
+                }) => {
+                    if responder
+                        .send(self.write_request(request, value, offset as usize).await)
+                        .is_err()
+                    {
+                        error!("error sending write_request response, receiver dropped");
+                    }
+                }
+                Some(PeripheralEvent::CharacteristicSubscriptionUpdate {
+                    request,
+                    subscribed,
+                }) => {
+                    if subscribed {
+                        self.subscribed(request).await;
+                    } else {
+                        self.unsubscribed(request).await;
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+}

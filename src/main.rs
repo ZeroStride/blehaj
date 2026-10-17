@@ -10,8 +10,12 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 use tracing_subscriber::{filter::EnvFilter, prelude::*};
 
-use crate::network_manager::NetworkManager;
+use crate::{
+    ble_peripheral_configuration_source::BlePeripheralConfigurationSource,
+    network_manager::NetworkManager,
+};
 
+mod ble_peripheral_configuration_source;
 mod configuration;
 mod error;
 mod network_manager;
@@ -89,7 +93,7 @@ async fn main() -> miette::Result<()> {
     })?;
 
     let network_device = network_manager
-        .device(configuration.network_interface)
+        .device(&configuration.network_interface)
         .await
         .map_err(|e| {
             if let network_manager::Error::MethodError(
@@ -119,36 +123,25 @@ async fn main() -> miette::Result<()> {
     //
 
     // Todo - This should actually be configurable
-    // let configuration_modes = vec![];
-    info!("initializing bluetooth session");
-    let session = bluer::Session::new().await.into_diagnostic()?;
-    info!(?session, "getting bluetooth adapter");
-    let adapter = match configuration.bluetooth_adapter {
-        configuration::BluetoothAdapter::Default => {
-            session.default_adapter().await.into_diagnostic()?
-        }
-        configuration::BluetoothAdapter::Named { name } => {
-            session.adapter(&name).into_diagnostic()?
-        }
-        configuration::BluetoothAdapter::All => todo!(),
-    };
-    info!(?adapter, "power on");
-    adapter.set_powered(true).await.into_diagnostic()?;
+    let configuration_source =
+        BlePeripheralConfigurationSource::new_from_configuration(&configuration)
+            .await
+            .into_diagnostic()?;
 
     //
     // Listen for signals
     //
-    let cancelation_token = CancellationToken::new();
+    let termination_token = CancellationToken::new();
     {
-        let cancelation_token = cancelation_token.clone();
+        let termination_token = termination_token.clone();
         let mut sigterm = signal(SignalKind::terminate()).into_diagnostic()?;
         tokio::spawn(async move {
             let shutdown = |signal| {
                 info!(%signal, "shutting down...");
-                cancelation_token.cancel();
+                termination_token.cancel();
             };
             tokio::select! {
-                _ = cancelation_token.cancelled() => {}
+                _ = termination_token.cancelled() => {}
                 _ = tokio::signal::ctrl_c() => {
                     shutdown("SIGINT");
                 }
@@ -160,42 +153,59 @@ async fn main() -> miette::Result<()> {
     }
 
     //
-    // So we either wait on a connectivity lost signal or we make it so the service
-    // is only started, by a watchdog or something, when connectivity is lost.
+    // Main service/wait loop
     //
-
-    //
-    // Start up the designated configuration mode(s), and wait to receive a configuration
-    //
-    let mut configuration_tasks: JoinSet<Result<Option<()>, std::io::Error>> = JoinSet::new();
-
+    #[allow(clippy::never_loop)]
     loop {
-        match configuration_tasks.join_next().await {
-            None => break,
-            Some(Err(e)) => {
-                error!(%e, "error while joining configuration task");
-            }
-            Some(Ok(Err(e))) => {
-                error!(%e, "error from configuration task");
-            }
-            Some(Ok(Ok(None))) => {
-                debug!("task completed without returning configuration");
-            }
-            Some(Ok(Ok(Some(_configuration)))) => {
-                let _checkpoint = network_manager
-                    .build_checkpoint()
-                    .for_device(&network_device)
-                    .with_rollback_timeout(Duration::from_secs(15)) // Todo - Configurable delay
-                    .destroy_all_on_create()
-                    .build()
-                    .await
-                    .into_diagnostic()?;
+        //
+        // So we either wait on a connectivity lost signal or we make it so the service
+        // is only started, by a watchdog or something, when connectivity is lost.
+        //
+        if termination_token.is_cancelled() {
+            break;
+        }
 
-                // Todo - Apply configuration
+        //
+        // Start up the designated configuration mode(s), and wait to receive a configuration
+        //
+        let cancel_configuration_token = termination_token.child_token();
+        let mut configuration_tasks: JoinSet<
+            Result<Option<Vec<u8>>, ble_peripheral_rust::error::Error>,
+        > = JoinSet::new();
 
-                // Todo - Validate with backend, then destroy checkpoint upon success
+        configuration_tasks.spawn(configuration_source.proc(cancel_configuration_token.clone()));
+
+        loop {
+            match configuration_tasks.join_next().await {
+                None => break,
+                Some(Err(e)) => {
+                    error!(%e, "error while joining configuration task");
+                }
+                Some(Ok(Err(e))) => {
+                    error!(%e, "error from configuration task");
+                }
+                Some(Ok(Ok(None))) => {
+                    debug!("task completed without returning configuration");
+                }
+                Some(Ok(Ok(Some(_configuration)))) => {
+                    let _checkpoint = network_manager
+                        .build_checkpoint()
+                        .for_device(&network_device)
+                        .with_rollback_timeout(Duration::from_secs(15)) // Todo - Configurable delay
+                        .destroy_all_on_create()
+                        .build()
+                        .await
+                        .into_diagnostic()?;
+
+                    // Todo - Apply configuration
+
+                    // Todo - Validate with backend, then destroy checkpoint upon success
+                }
             }
         }
+
+        // Hack - Just break here for development.
+        break;
     }
 
     Ok(())

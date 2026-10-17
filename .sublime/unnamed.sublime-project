@@ -8,6 +8,15 @@
     ],
     "build_systems": [],
     "settings": {
+        // "rust_syntax_checking": false,
         "rust_syntax_checking_method": "clippy",
+        "LSP": {
+            "LSP-rust-analyzer": {
+                "initialization_options": {
+                    // "check.overrideCommand": ["cross", "check", "--message-format=json"],
+                    // "cargo.buildScripts.overrideCommand": ["cross", "check", "--message-format=json"],
+                }
+            }
+        }
     },
 }

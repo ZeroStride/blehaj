@@ -7,6 +7,9 @@ cargo-binstall = "latest"
 "cargo:systemd-lsp" = { version = "latest", lazy = true }
 rust = { version = "nightly-2026-10-01", profile = "minimal", components = "rustfmt,clippy" }
 
+[env]
+CROSS_CONTAINER_UID = 0
+
 [tasks.ci]
 depends = ["lint", "test", "deny"]
 

@@ -202,20 +202,17 @@ impl NetworkManager<'_> {
     }
 
     #[instrument(skip(self))]
-    pub async fn device(&self, name: String) -> Result<Device, Error> {
+    pub async fn device(&self, name: &String) -> Result<Device, Error> {
         trace!("getting device");
         Ok(Device::new(
-            self.proxy
-                .get_device_by_ip_iface(&name)
-                .await
-                .map_err(|e| {
-                    if let zbus::Error::MethodError(ref error_name, ..) = e
-                        && *error_name == "org.freedesktop.NetworkManager.UnknownDevice"
-                    {
-                        return MethodError::UnknownDevice(name);
-                    }
-                    e.into()
-                })?,
+            self.proxy.get_device_by_ip_iface(name).await.map_err(|e| {
+                if let zbus::Error::MethodError(ref error_name, ..) = e
+                    && *error_name == "org.freedesktop.NetworkManager.UnknownDevice"
+                {
+                    return MethodError::UnknownDevice(name.to_string());
+                }
+                e.into()
+            })?,
         ))
     }
 

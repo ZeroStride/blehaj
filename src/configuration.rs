@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum BluetoothAdapter {
     All,
-    First,
+    Default,
     Named { name: String },
 }
 
@@ -15,7 +15,7 @@ impl fmt::Display for BluetoothAdapter {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::All => write!(f, "all"),
-            Self::First => write!(f, "first"),
+            Self::Default => write!(f, "default"),
             Self::Named { name } => fmt::Display::fmt(name, f),
         }
     }
@@ -38,14 +38,14 @@ impl Configuration {
             json: cli.json,
             bluetooth_adapter: {
                 match cli.adapter {
-                    None => BluetoothAdapter::First,
+                    None => BluetoothAdapter::Default,
                     Some(adapter) => {
                         if let Some(name) = adapter.named {
                             BluetoothAdapter::Named { name }
                         } else if adapter.all.is_some() {
                             BluetoothAdapter::All
                         } else {
-                            BluetoothAdapter::First
+                            BluetoothAdapter::Default
                         }
                     }
                 }
@@ -67,9 +67,9 @@ mod ux {
         #[arg(hide_possible_values = true)]
         pub all: Option<bool>,
 
-        /// Use the first compatible Bluetooth adapter. (Default)
+        /// Use the default Bluetooth adapter. (Default)
         #[arg(hide_possible_values = true)]
-        pub first: Option<bool>,
+        pub default: Option<bool>,
 
         /// Name of the Bluetooth adapter to use.
         #[arg(value_name = "<NAME>")]

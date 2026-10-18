@@ -2,7 +2,7 @@
     "folders": [
         {
             "folder_exclude_patterns": ["target", "artifacts", "node_modules"],
-            "binary_file_patterns": ["*/target/*", "*/artifacts/*", "*/node_modules/*"],
+            "binary_file_patterns": ["*/target/*", "*/artifacts/*", "*/node_modules/*", "package-lock.json"],
             "path": ".."
         }
     ],

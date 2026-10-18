@@ -2,7 +2,6 @@ use ble_peripheral_rust::{
     Peripheral, PeripheralImpl,
     gatt::{
         characteristic::Characteristic,
-        descriptor::Descriptor,
         peripheral_event::{
             PeripheralEvent, PeripheralRequest, ReadRequestResponse, RequestResponse,
             WriteRequestResponse,
@@ -25,6 +24,7 @@ pub struct BlePeripheralConfigurationSource {
     peripheral: Peripheral,
     event_rx: Receiver<PeripheralEvent>,
     service: Service,
+    qr_code_url_prefix: Option<String>,
 }
 
 impl BlePeripheralConfigurationSource {
@@ -53,6 +53,7 @@ impl BlePeripheralConfigurationSource {
         Ok(BlePeripheralConfigurationSource {
             peripheral,
             event_rx,
+            qr_code_url_prefix: configuration.qr_code_url_prefix.clone(),
             service: Service {
                 uuid: configuration.bluetooth_service_uuid,
                 primary: true,
@@ -123,6 +124,23 @@ impl BlePeripheralConfigurationSource {
         self.peripheral
             .start_advertising("unnamed-todo-add-setting", &[self.service.uuid])
             .await?;
+
+        #[cfg(feature = "qrcode")]
+        if let Some(ref qr_code_url_prefix) = self.qr_code_url_prefix {
+            use qrcode_generator::{
+                Renderer,
+                qr::{Encoder, ErrorCorrection},
+            };
+            use url::Url;
+
+            let url = Url::parse(format!("{}{}", qr_code_url_prefix, self.service.uuid).as_str())
+                .unwrap();
+            let symbol = Encoder::new(ErrorCorrection::Medium)
+                .encode_to_qr_text(&url)
+                .unwrap();
+            let renderer = Renderer::new(&symbol, 0);
+            info!(%url, "running...\n{:#}", renderer);
+        }
 
         while let Some(event) = self
             .event_rx

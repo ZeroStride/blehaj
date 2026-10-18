@@ -31,11 +31,21 @@ pub struct Configuration {
     pub network_interface: String,
     pub exit_after_configuration: bool,
     pub systemd_launched: bool,
+    pub qr_code_url_prefix: Option<String>,
 }
 
 impl Configuration {
     pub fn new() -> Self {
         let cli = ux::Cli::parse();
+
+        #[cfg(feature = "qrcode")]
+        {
+            use tracing::warn;
+
+            if cli.qr_code_url_prefix.is_some() {
+                warn!("QR Code Generation feature is disabled, build with feature 'qrcode.");
+            }
+        }
 
         Configuration {
             json: cli.json,
@@ -57,12 +67,14 @@ impl Configuration {
             network_interface: cli.interface,
             exit_after_configuration: cli.configuration,
             systemd_launched: std::os::unix::process::parent_id() == 1,
+            qr_code_url_prefix: cli.qr_code_url_prefix.map(String::from),
         }
     }
 }
 
 mod ux {
     use clap::Parser;
+    use url::Url;
     use uuid::Uuid;
 
     // #[derive(Args, Clone, Debug)]
@@ -100,5 +112,9 @@ mod ux {
         /// Static Bluetooth Service UUID
         #[arg(long)]
         pub service_uuid: Option<Uuid>,
+
+        /// Url prefix for QR Code Generation, e.g. "http://localhost:3000/?uuid="
+        #[arg(long)]
+        pub qr_code_url_prefix: Option<Url>,
     }
 }

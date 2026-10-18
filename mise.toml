@@ -27,16 +27,16 @@ run = "cargo deny check"
 [tasks.lint]
 description = "Lint the rust code"
 run = [
-  "cargo fmt-toml --check --quiet",
-  "cargo fmt --all -- --check",
-  "cargo clippy --workspace --all-targets",
+  "cross fmt-toml --check --quiet",
+  "cross fmt --all -- --check",
+  "cross clippy --workspace --all-targets",
 ]
 wait_for = ["deny"]
 
 [tasks.test]
 description = "Launch tests"
 run = [
-  "cargo nextest run",
+  "cross nextest run",
   # "cargo test --doc",
 ]
 wait_for = ["lint"]

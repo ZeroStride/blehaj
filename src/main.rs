@@ -1,4 +1,4 @@
-use std::{io::IsTerminal, time::Duration};
+use std::{collections::HashMap, io::IsTerminal, time::Duration};
 
 use clap::{crate_name, crate_version};
 use miette::IntoDiagnostic;
@@ -9,10 +9,11 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 use tracing_subscriber::{filter::EnvFilter, prelude::*};
+use zbus::zvariant;
 
 use crate::{
     ble_peripheral_configuration_source::BlePeripheralConfigurationSource,
-    network_manager::NetworkManager,
+    network_manager::NetworkManager, zvariant::Signature,
 };
 
 mod ble_peripheral_configuration_source;
@@ -187,19 +188,67 @@ async fn main() -> miette::Result<()> {
                 Some(Ok(Ok(None))) => {
                     debug!("task completed without returning configuration");
                 }
-                Some(Ok(Ok(Some(_configuration)))) => {
-                    let _checkpoint = network_manager
-                        .build_checkpoint()
-                        .for_device(&network_device)
-                        .with_rollback_timeout(Duration::from_secs(15)) // Todo - Configurable delay
-                        .destroy_all_on_create()
-                        .build()
-                        .await
-                        .into_diagnostic()?;
+                Some(Ok(Ok(Some(configuration_bytes)))) => {
+                    info!("deserializing configuration json");
+                    match serde_json::from_slice::<HashMap<&str, HashMap<&str, zvariant::Value>>>(
+                        &configuration_bytes,
+                    ) {
+                        Ok(connection_settings) => {
+                            info!(
+                                ?connection_settings,
+                                "connection received from configuration source"
+                            );
 
-                    // Todo - Apply configuration
+                            // Unpack into connection settings, and fix the data type of the SSID.
+                            let connection_settings =
+                                if *connection_settings["802-11-wireless"]["ssid"].value_signature()
+                                    == Signature::Str
+                                {
+                                    // The string gets double-quotes around it when it deserializes from
+                                    // the  zvariant Value type.
+                                    let ssid_string =
+                                        connection_settings["802-11-wireless"]["ssid"]
+                                            .to_string()
+                                            .trim_matches('\"')
+                                            .to_string();
 
-                    // Todo - Validate with backend, then destroy checkpoint upon success
+                                    let mut connection_settings = connection_settings;
+                                    if let Some(wireless_802_11) =
+                                        connection_settings.get_mut("802-11-wireless")
+                                        && let Some(ssid) = wireless_802_11.get_mut("ssid")
+                                    {
+                                        *ssid = ssid_string.into_bytes().into();
+                                    }
+                                    connection_settings
+                                } else {
+                                    connection_settings
+                                };
+
+                            let _checkpoint = network_manager
+                                .build_checkpoint()
+                                .for_device(&network_device)
+                                .with_rollback_timeout(Duration::from_secs(15)) // Todo - Configurable delay
+                                .destroy_all_on_create()
+                                .build()
+                                .await
+                                .into_diagnostic()?;
+
+                            // Todo - Apply configuration
+                            // network_manager
+                            //     .add_and_activate_connection(
+                            //         connection_settings,
+                            //         &network_interface_path,
+                            //         &"/".try_into().into_diagnostic()?,
+                            //     )
+                            //     .await
+                            //     .into_diagnostic()?;
+
+                            // Todo - Validate with backend, then destroy checkpoint upon success
+                        }
+                        Err(e) => {
+                            error!(%e, "deserialization error");
+                        }
+                    }
                 }
             }
         }

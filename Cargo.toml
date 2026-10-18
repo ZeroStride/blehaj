@@ -9,7 +9,7 @@ ble-peripheral-rust = "0.2.0"
 # bluer = { git = "https://github.com/bluez/bluer.git", branch = "zbus2", features = ["bluetoothd"] }
 clap = { version = "4.6.7", features = ["cargo", "derive"] }
 miette = { version = "7.6.0", features = ["fancy"] }
-qrcode-generator = { version = "6.1.2", default-features = false, features = ["micro-qr", "qr", "url"], optional = true }
+qrcode-generator = { version = "6.1.2", default-features = false, features = ["qr", "url"], optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 thiserror = "2.0.21"

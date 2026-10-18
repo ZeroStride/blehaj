@@ -9,14 +9,15 @@ use ble_peripheral_rust::{
         properties::{AttributePermission, CharacteristicProperty},
         service::Service,
     },
-    uuid::ShortUuid,
 };
-use tokio::sync::{mpsc, mpsc::Receiver};
+use tokio::sync::{mpsc, mpsc::Receiver, oneshot::Sender};
 use tokio_util::{future::FutureExt, sync::CancellationToken};
 use tracing::{debug, error, info, instrument};
-use uuid::Uuid;
+use uuid::{Uuid, uuid};
 
 use crate::configuration::{self};
+
+const CONFIGURATION_CHARACTERISTIC_UUID: Uuid = uuid!("4b3bd2c3-2560-4353-8d37-05ca8333d01e");
 
 pub struct BlePeripheralConfigurationSource {
     // session: bluer::Session,
@@ -45,8 +46,6 @@ impl BlePeripheralConfigurationSource {
 
         // Ok(BlePeripheralConfigurationSource { session, adapter })
 
-        let char_uuid = Uuid::from_short(0x2A3D_u16);
-
         info!("initializing bluetooth peripheral");
         let (event_tx, event_rx) = mpsc::channel::<PeripheralEvent>(256);
         let peripheral = Peripheral::new(event_tx).await?;
@@ -58,7 +57,7 @@ impl BlePeripheralConfigurationSource {
                 uuid: configuration.bluetooth_service_uuid,
                 primary: true,
                 characteristics: vec![Characteristic {
-                    uuid: char_uuid,
+                    uuid: CONFIGURATION_CHARACTERISTIC_UUID,
                     properties: vec![
                         CharacteristicProperty::Read,
                         CharacteristicProperty::Write,
@@ -76,14 +75,26 @@ impl BlePeripheralConfigurationSource {
     }
     #[instrument(skip(self))]
     async fn state_update(&self, is_powered: bool) {
-        debug!(%is_powered, "state update");
+        debug!("state update");
     }
 
     #[instrument(skip(self))]
-    async fn read_request(&self, request: PeripheralRequest, offset: usize) -> ReadRequestResponse {
-        ReadRequestResponse {
-            value: String::from("ok").into(),
-            response: RequestResponse::Success,
+    async fn read_request(
+        &self,
+        request: PeripheralRequest,
+        offset: usize,
+        responder: Sender<ReadRequestResponse>,
+    ) {
+        let value = String::from("ok");
+        debug!(value, "sending data to read_request");
+        if responder
+            .send(ReadRequestResponse {
+                value: value.into(),
+                response: RequestResponse::Success,
+            })
+            .is_err()
+        {
+            error!("error sending read_request response, receiver dropped");
         }
     }
 
@@ -93,23 +104,31 @@ impl BlePeripheralConfigurationSource {
         request: PeripheralRequest,
         value: Vec<u8>,
         offset: usize,
-    ) -> WriteRequestResponse {
-        WriteRequestResponse {
-            response: RequestResponse::Success,
+        responder: Sender<WriteRequestResponse>,
+    ) -> Option<Vec<u8>> {
+        if responder
+            .send(WriteRequestResponse {
+                response: RequestResponse::Success,
+            })
+            .is_err()
+        {
+            error!("error sending write_request response, receiver dropped");
         }
+        debug!("received data from write_request");
+        Some(value)
     }
 
     #[instrument(skip(self))]
     async fn subscribed(&self, request: PeripheralRequest) {
-        debug!(?request, "subscribed");
+        debug!("subscribed");
     }
 
     #[instrument(skip(self))]
     async fn unsubscribed(&self, request: PeripheralRequest) {
-        debug!(?request, "unsubscribed");
+        debug!("unsubscribed");
     }
 
-    #[instrument(skip(self))]
+    #[instrument(skip(self, cancellation_token))]
     pub async fn proc(
         mut self,
         cancellation_token: CancellationToken,
@@ -158,12 +177,7 @@ impl BlePeripheralConfigurationSource {
                     offset,
                     responder,
                 }) => {
-                    if responder
-                        .send(self.read_request(request, offset as usize).await)
-                        .is_err()
-                    {
-                        error!("error sending read_request response, receiver dropped");
-                    }
+                    self.read_request(request, offset as usize, responder).await;
                 }
                 Some(PeripheralEvent::WriteRequest {
                     request,
@@ -171,11 +185,12 @@ impl BlePeripheralConfigurationSource {
                     offset,
                     responder,
                 }) => {
-                    if responder
-                        .send(self.write_request(request, value, offset as usize).await)
-                        .is_err()
+                    match self
+                        .write_request(request, value, offset as usize, responder)
+                        .await
                     {
-                        error!("error sending write_request response, receiver dropped");
+                        None => {}
+                        Some(configuration_bytes) => return Ok(Some(configuration_bytes)),
                     }
                 }
                 Some(PeripheralEvent::CharacteristicSubscriptionUpdate {

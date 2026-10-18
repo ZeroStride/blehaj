@@ -8,6 +8,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/web-bluetooth": "^0.0.21",
+    "@yudiel/react-qr-scanner": "^2.6.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-scripts": "5.0.1",

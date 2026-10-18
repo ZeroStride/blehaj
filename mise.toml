@@ -1,11 +1,11 @@
 [tools]
-cargo-binstall = "latest"
-"cargo:cargo-cross" = "latest"
-"cargo:cargo-deny" = "latest"
-"cargo:cargo-fmt-toml" = "latest"
-"cargo:cargo-nextest" = "latest"
-"cargo:systemd-lsp" = { version = "latest", lazy = true } # todo lazy_bins
-rust = { version = "nightly-2026-10-01", profile = "minimal", components = "rustfmt,clippy" }
+cargo-binstall = { version = "latest", lazy = true }
+"cargo:cargo-cross" = { version = "latest", lazy = true, lazy_bins = ['cross'] }
+"cargo:cargo-deny" = { version = "latest", lazy = true, lazy_bins = ['cargo'] }
+"cargo:cargo-fmt-toml" = { version = "latest", lazy = true, lazy_bins = ['cargo'] }
+"cargo:cargo-nextest" = { version = "latest", lazy = true, lazy_bins = ['cargo'] }
+"cargo:systemd-lsp" = { version = "latest", lazy = true, lazy_bins = ['systemd-lsp'] }
+rust = { version = "nightly-2026-10-01", profile = "minimal", components = "rustfmt,clippy", lazy = true }
 
 [env]
 CROSS_CONTAINER_UID = 0

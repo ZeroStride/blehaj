@@ -31,7 +31,9 @@ jobs:
           minimum_release_age: 7d
           working_directory: demo
           cache_key_prefix: mise-v0-${{ env.MISE_ENABLE_TOOLS }}
-      - run: npm run build
+      - run: |
+          npm install
+          npm run build
         working-directory: demo
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5

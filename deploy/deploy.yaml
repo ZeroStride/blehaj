@@ -28,7 +28,7 @@
       - name: check if binary has changed
         ansible.builtin.copy:
           dest: /opt/{{ project_name }}/bin
-          src: ../artifacts/{{ project_name }}
+          src: ../target/aarch64-unknown-linux-gnu/release/{{ project_name }}
           mode: 0755
           group: netdev
         check_mode: true
@@ -42,7 +42,7 @@
       - name: copy binary to /opt/{{ project_name }}/bin
         ansible.builtin.copy:
           dest: /opt/{{ project_name }}/bin
-          src: ../artifacts/{{ project_name }}
+          src: ../target/aarch64-unknown-linux-gnu/release/{{ project_name }}
           mode: 0755
           group: netdev
         when: check_copy.changed

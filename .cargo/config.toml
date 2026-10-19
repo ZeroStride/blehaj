@@ -3,6 +3,3 @@
 
 [target.aarch64-unknown-linux-gnu]
 # runner = "" # Todo - Could automate scp and whatnot
-
-[unstable]
-unstable-options = true

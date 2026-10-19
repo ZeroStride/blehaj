@@ -16,7 +16,7 @@ depends = ["lint", "test", "deny"]
 [tasks.cross]
 description = "Build with cross"
 run = [
-  "cross +nightly build --all --release --artifact-dir artifacts",
+  "cross build --all --release",
   "(cd deploy ; mise deploy)"
 ]
 
@@ -50,7 +50,7 @@ run = [
 [tasks.rr]
 description = "Copy & Run using systemd-run"
 run = [
-  "cross +nightly build --all --release --artifact-dir artifacts",
-  "scp artifacts/unnamed {{ vars.destination_user_at_host }}:~/",
+  "cross build --all --release ",
+  "scp target/aarch64-unknown-linux-gnu/release/unnamed {{ vars.destination_user_at_host }}:~/",
   "ssh {{ vars.destination_user_at_host }} -t 'systemd-run -p Group=netdev -p ConfigurationDirectory=unnamed -p ConfigurationDirectoryMode=0555 -p RestrictRealtime=yes -p MemoryDenyWriteExecute=yes --pipe --pty /opt/unnamed/bin/unnamed wlan0'"
 ]

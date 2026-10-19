@@ -2,7 +2,6 @@
 
 ## Todo
 
-- [ ] MSRV
 - [ ] Come up with a name
 
 # Other Interesting Things

@@ -5,7 +5,7 @@ cargo-binstall = { version = "latest", lazy = true }
 "cargo:cargo-fmt-toml" = { version = "latest", lazy = true, lazy_bins = ['cargo'] }
 "cargo:cargo-nextest" = { version = "latest", lazy = true, lazy_bins = ['cargo'] }
 "cargo:systemd-lsp" = { version = "latest", lazy = true, lazy_bins = ['systemd-lsp'] }
-rust = { version = "nightly-2026-10-01", profile = "minimal", components = "rustfmt,clippy", lazy = true }
+rust = { version = "1.89", profile = "minimal", components = "rustfmt,clippy", lazy = true }
 
 [env]
 CROSS_CONTAINER_UID = 0
@@ -16,7 +16,7 @@ depends = ["lint", "test", "deny"]
 [tasks.cross]
 description = "Build with cross"
 run = [
-  "cross build --all --release --artifact-dir artifacts",
+  "cross +nightly build --all --release --artifact-dir artifacts",
   "(cd deploy ; mise deploy)"
 ]
 
@@ -50,7 +50,7 @@ run = [
 [tasks.rr]
 description = "Copy & Run using systemd-run"
 run = [
-  "cross build --all --release --artifact-dir artifacts",
+  "cross +nightly build --all --release --artifact-dir artifacts",
   "scp artifacts/unnamed {{ vars.destination_user_at_host }}:~/",
   "ssh {{ vars.destination_user_at_host }} -t 'systemd-run -p Group=netdev -p ConfigurationDirectory=unnamed -p ConfigurationDirectoryMode=0555 -p RestrictRealtime=yes -p MemoryDenyWriteExecute=yes --pipe --pty /opt/unnamed/bin/unnamed wlan0'"
 ]

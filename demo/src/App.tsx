@@ -1,10 +1,11 @@
-/// <reference types="web-bluetooth" />
+import { APITester } from "./APITester";
+import "./index.css";
 
-import React from 'react';
-import { useState } from 'react';
-import logo from './logo.svg';
-import './App.css';
+import logo from "./logo.svg";
+import reactLogo from "./react.svg";
+
 import { type IDetectedBarcode, Scanner } from '@yudiel/react-qr-scanner';
+import { useState } from 'react';
 
 function ConfigurationJsonForAP(ssid:String, security:String, password:String | null) {
   const network_manager_json = {
@@ -93,7 +94,7 @@ function ConfigurationJsonForAP(ssid:String, security:String, password:String | 
   };
 }
 
-function App() {
+export function App() {
   const CONFIGURATION_CHARACTERISTIC_UUID = "4b3bd2c3-2560-4353-8d37-05ca8333d01e";
   const queryParams = new URLSearchParams(window.location.search);
   const uuid = queryParams.get("uuid");
@@ -102,10 +103,13 @@ function App() {
   const [configurationCharacteristic, setConfigurationCharacteristic] = useState<BluetoothRemoteGATTCharacteristic>();
 
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        {!uuid && (<div>No UUID in URL Param; can't do the thing</div>)}
+    <div className="app">
+      <div className="logo-container">
+        <img src={logo} alt="Bun Logo" className="logo bun-logo" />
+        <img src={reactLogo} alt="React Logo" className="logo react-logo" />
+      </div>
+
+      {!uuid && (<div>No UUID in URL Param; can't do the thing</div>)}
         {!configurationCharacteristic && uuid && (<button onClick={() => {
           navigator.bluetooth
             .requestDevice({filters:[
@@ -151,7 +155,7 @@ function App() {
           onError={(error) => console.log(error?.message)}
           sound="false"
         />)}
-      </header>
+      <APITester />
     </div>
   );
 }

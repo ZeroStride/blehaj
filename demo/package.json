@@ -1,40 +1,27 @@
 {
-  "name": "demo",
+  "name": "unnamed-demo",
+  "homepage": "https://zerostride.github.io/unnamed",
   "version": "0.1.0",
   "private": true,
-  "homepage": "https://zerostride.github.io/unnamed",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "build": "bun build ./src/index.html --outdir=dist --sourcemap --target=browser --minify --define:process.env.NODE_ENV='\"production\"' --env='BUN_PUBLIC_*'",
+    "start": "NODE_ENV=production bun src/index.ts",
+    "typecheck": "bun check"
+  },
   "dependencies": {
-    "@types/node": "^16.18.126",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
     "@types/web-bluetooth": "^0.0.21",
     "@yudiel/react-qr-scanner": "^2.6.0",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "react-scripts": "5.0.1",
-    "typescript": "^4.9.5",
-    "web-vitals": "^2.1.4"
+    "react": "^19",
+    "react-dom": "^19"
   },
-  "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "eject": "react-scripts eject"
+  "devDependencies": {
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/bun": "latest"
   },
-  "eslintConfig": {
-    "extends": [
-      "react-app"
-    ]
-  },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
+  "peerDependencies": {
+    "typescript": "^7"
   }
 }

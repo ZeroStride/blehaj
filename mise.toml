@@ -41,6 +41,12 @@ run = [
 ]
 wait_for = ["lint"]
 
+[tasks.xmlgen]
+description = "(Re)generate the generated Zbus interfaces"
+run = [
+  "ssh {{ vars.destination_user_at_host }} -t 'curl -s https://raw.githubusercontent.com/NetworkManager/NetworkManager/refs/heads/main/introspection/org.freedesktop.NetworkManager.xml | zbus-xmlgen -o - file -' > {{ config_root }}/src/network_manager/generated/network_manager.rs"
+]
+
 [tasks.rr]
 description = "Copy & Run using systemd-run"
 run = [

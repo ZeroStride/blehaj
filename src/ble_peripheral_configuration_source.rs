@@ -78,7 +78,7 @@ impl BlePeripheralConfigurationSource {
         debug!("state update");
     }
 
-    #[instrument(skip(self))]
+    #[instrument(skip(self, responder))]
     async fn read_request(
         &self,
         request: PeripheralRequest,
@@ -98,7 +98,7 @@ impl BlePeripheralConfigurationSource {
         }
     }
 
-    #[instrument(skip(self))]
+    #[instrument(skip(self, value, responder))]
     async fn write_request(
         &self,
         request: PeripheralRequest,

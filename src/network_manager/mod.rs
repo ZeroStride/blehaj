@@ -1,14 +1,11 @@
 mod generated;
 
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use generated::NetworkManagerProxy;
 use thiserror::Error;
 use tracing::{instrument, trace};
-use zbus::{
-    Connection,
-    zvariant::{ObjectPath, OwnedObjectPath},
-};
+use zbus::{Connection, ObjectPath, OwnedObjectPath};
 
 /// NetworkManager errors.
 #[derive(Debug, Error)]
@@ -30,7 +27,7 @@ pub enum Error {
     MethodError(#[from] MethodError),
 
     #[error("argument error {description}")]
-    ArgumentError {
+    Argument {
         description: String,
 
         #[source]
@@ -76,7 +73,6 @@ unsafe impl Sync for MethodError {}
 impl From<zbus::Error> for MethodError {
     fn from(e: zbus::Error) -> Self {
         if let zbus::Error::MethodError(ref name, ref detail, ref reply) = e {
-            trace!(?detail, ?reply, "zbus::Error '{}'", name);
             match name.as_str() {
                 "org.freedesktop.NetworkManager.PermissionDenied" => {
                     return MethodError::PermissionDenied(
@@ -91,6 +87,7 @@ impl From<zbus::Error> for MethodError {
                     );
                 }
                 &_ => {
+                    trace!(?detail, ?reply, "zbus::Error '{}'", name);
                     return MethodError::Other {
                         name: name.to_string(),
                         detail: detail.clone(),
@@ -158,7 +155,7 @@ impl TryFrom<u32> for ConnectivityState {
             50 => Ok(Self::ConnectedLocal),
             60 => Ok(Self::ConnectedSite),
             70 => Ok(Self::ConnectedGlobal),
-            _ => Err(Error::ArgumentError {
+            _ => Err(Error::Argument {
                 description: format!("unknown state value {x}").to_string(),
                 source: None,
             }),
@@ -182,7 +179,7 @@ impl std::fmt::Display for ConnectivityState {
 }
 
 pub struct NetworkManager<'proxy> {
-    system_bus_connection: zbus::Connection,
+    _system_bus_connection: zbus::Connection,
     proxy: generated::NetworkManagerProxy<'proxy>,
 }
 
@@ -196,16 +193,16 @@ impl NetworkManager<'_> {
         trace!(?system_bus_connection, "creating proxy");
         let proxy = NetworkManagerProxy::new(&system_bus_connection).await?;
         Ok(NetworkManager {
-            system_bus_connection,
+            _system_bus_connection: system_bus_connection,
             proxy,
         })
     }
 
     #[instrument(skip(self))]
-    pub async fn device(&self, name: &String) -> Result<Device, Error> {
+    pub async fn device(&self, name: &String) -> Result<Device<'_>, Error> {
         trace!("getting device");
-        Ok(Device::new(
-            self.proxy.get_device_by_ip_iface(name).await.map_err(|e| {
+        Ok(Device {
+            path: self.proxy.get_device_by_ip_iface(name).await.map_err(|e| {
                 if let zbus::Error::MethodError(ref error_name, ..) = e
                     && *error_name == "org.freedesktop.NetworkManager.UnknownDevice"
                 {
@@ -213,7 +210,8 @@ impl NetworkManager<'_> {
                 }
                 e.into()
             })?,
-        ))
+            manager: self,
+        })
     }
 
     #[instrument(skip(self))]
@@ -232,14 +230,39 @@ impl NetworkManager<'_> {
     }
 }
 
-pub struct Device {
+pub struct Device<'manager> {
     path: OwnedObjectPath,
+    manager: &'manager NetworkManager<'manager>,
 }
 
-impl Device {
-    #[instrument]
-    fn new(path: OwnedObjectPath) -> Self {
-        Device { path }
+impl Device<'_> {
+    #[instrument(skip(self, connection_settings))]
+    pub async fn add_and_activate_connection(
+        &self,
+        connection_settings: HashMap<&str, HashMap<&str, zbus::Variant<'_>>>,
+    ) -> Result<(OwnedObjectPath, OwnedObjectPath), Error> {
+        let uuid: String = connection_settings["connection"]["uuid"]
+            .to_string()
+            .trim_matches('\"')
+            .to_string();
+        trace!(connection = ?connection_settings["connection"], "creating connection");
+        let path_tuple = self
+            .manager
+            .proxy
+            .add_and_activate_connection(
+                connection_settings,
+                &self.path,
+                &"/".try_into().map_err(Error::from)?,
+            )
+            .await
+            .map_err(Error::from)?;
+        trace!(
+            uuid,
+            connection = ?path_tuple.0,
+            active_connection = ?path_tuple.1,
+            "connection added and active"
+        );
+        Ok(path_tuple)
     }
 }
 
@@ -248,11 +271,58 @@ pub struct Checkpoint<'manager> {
     path: OwnedObjectPath,
 }
 
-// impl Checkpoint<'_> {
-//     pub async fn rollback(self) -> Result<(), Error> {
+impl Checkpoint<'_> {
+    #[instrument(skip(self))]
+    pub async fn rollback(self) -> Result<(), Error> {
+        // Todo - Implement NMRollbackResult
+        trace!(%self.path, "rolling back checkpoint");
+        self.network_manager
+            .proxy
+            .checkpoint_rollback(&self.path)
+            .await
+            .map(|_| Ok(()))
+            .map_err(Error::from)?
+    }
 
-//     }
-// }
+    #[instrument(skip(self))]
+    pub async fn commit(self) -> Result<(), Error> {
+        trace!(%self.path, "destroying checkpoint");
+        self.network_manager
+            .proxy
+            .checkpoint_destroy(&self.path)
+            .await
+            .map_err(Error::from)
+    }
+
+    #[instrument(skip(self))]
+    pub async fn extend(self, new_timeout: Duration) -> Result<(), Error> {
+        trace!(%self.path, "adjusting rollback timeout for checkpoint");
+        let new_timeout_secs: u32 =
+            new_timeout
+                .as_secs()
+                .try_into()
+                .map_err(|e| Error::Argument {
+                    description: "Duration provided to 'extend' exceeded u32::MAX seconds"
+                        .to_string(),
+                    source: Some(Box::new(e)),
+                })?;
+
+        self.network_manager
+            .proxy
+            .checkpoint_adjust_rollback_timeout(&self.path, new_timeout_secs)
+            .await
+            .map_err(Error::from)
+    }
+}
+
+impl std::fmt::Debug for Checkpoint<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("Checkpoint")
+            .field("path", &self.path)
+            .field("flags", &"todo")
+            .finish()
+    }
+}
 
 pub struct CheckpointBuilder<'manager> {
     network_manager: &'manager NetworkManager<'manager>,
@@ -289,16 +359,16 @@ impl<'manager> CheckpointBuilder<'manager> {
     pub async fn build(self) -> Result<Checkpoint<'manager>, Error> {
         trace!(builder = ?self, "creating checkpoint");
         let path = self.network_manager.proxy.checkpoint_create(
-            &self.devices.ok_or(Error::ArgumentError {
+            &self.devices.ok_or(Error::Argument {
                 description: "must add devices to the Checkpoint using 'for_device', 'for_devices', or specify 'for_all_devices'".to_string(),
                 source: None,
             })?,
             self.rollback_timeout
-                .ok_or(Error::ArgumentError {
+                .ok_or(Error::Argument {
                     description: "'with_rollback_timeout' not specified".to_string(),
                     source: None,
                 })?.try_into()
-                .map_err(|e| Error::ArgumentError {
+                .map_err(|e| Error::Argument {
                     description:
                         "Duration provided to 'with_rollback_timeout' exceeded u32::MAX seconds"
                             .to_string(),

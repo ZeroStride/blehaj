@@ -7,13 +7,13 @@ use tokio::{
     task::JoinSet,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::{filter::EnvFilter, prelude::*};
-use zbus::zvariant;
+use zbus::Signature;
 
 use crate::{
     ble_peripheral_configuration_source::BlePeripheralConfigurationSource,
-    network_manager::NetworkManager, zvariant::Signature,
+    network_manager::NetworkManager,
 };
 
 mod ble_peripheral_configuration_source;
@@ -189,16 +189,11 @@ async fn main() -> miette::Result<()> {
                     debug!("task completed without returning configuration");
                 }
                 Some(Ok(Ok(Some(configuration_bytes)))) => {
-                    info!("deserializing configuration json");
-                    match serde_json::from_slice::<HashMap<&str, HashMap<&str, zvariant::Value>>>(
+                    debug!("deserializing configuration json");
+                    match serde_json::from_slice::<HashMap<&str, HashMap<&str, zbus::Variant<'_>>>>(
                         &configuration_bytes,
                     ) {
                         Ok(connection_settings) => {
-                            info!(
-                                ?connection_settings,
-                                "connection received from configuration source"
-                            );
-
                             // Unpack into connection settings, and fix the data type of the SSID.
                             let connection_settings =
                                 if *connection_settings["802-11-wireless"]["ssid"].value_signature()
@@ -212,6 +207,11 @@ async fn main() -> miette::Result<()> {
                                             .trim_matches('\"')
                                             .to_string();
 
+                                    debug!(
+                                        ssid = ssid_string,
+                                        "rewriting 'ssid' in '802-11-wireless' into bytes from String"
+                                    );
+
                                     let mut connection_settings = connection_settings;
                                     if let Some(wireless_802_11) =
                                         connection_settings.get_mut("802-11-wireless")
@@ -224,26 +224,51 @@ async fn main() -> miette::Result<()> {
                                     connection_settings
                                 };
 
-                            let _checkpoint = network_manager
+                            let checkpoint = match network_manager
                                 .build_checkpoint()
                                 .for_device(&network_device)
                                 .with_rollback_timeout(Duration::from_secs(15)) // Todo - Configurable delay
                                 .destroy_all_on_create()
+                                .delete_new_connections_on_rollback()
                                 .build()
                                 .await
-                                .into_diagnostic()?;
+                            {
+                                Err(e) => {
+                                    warn!(%e, "error creating checkpoint, continuing without checkpoint");
+                                    None
+                                }
+                                Ok(checkpoint) => {
+                                    debug!(?checkpoint, "checkpoint created");
+                                    Some(checkpoint)
+                                }
+                            };
 
-                            // Todo - Apply configuration
-                            // network_manager
-                            //     .add_and_activate_connection(
-                            //         connection_settings,
-                            //         &network_interface_path,
-                            //         &"/".try_into().into_diagnostic()?,
-                            //     )
-                            //     .await
-                            //     .into_diagnostic()?;
+                            let (_connection, active_connection) = network_device
+                                .add_and_activate_connection(connection_settings)
+                                .await
+                                .into_diagnostic()?;
+                            info!(
+                                ?active_connection,
+                                "connection added and active, testing connectivity"
+                            );
 
                             // Todo - Validate with backend, then destroy checkpoint upon success
+
+                            // if let Some(checkpoint) = checkpoint {
+                            //     match checkpoint.rollback().await {
+                            //         Err(e) => warn!(%e, "error while rolling-back checkpoint"),
+                            //         Ok(_) => debug!("checkpoint rolled back"),
+                            //     }
+                            // }
+
+                            // Configuration successful, destroy checkpoint
+                            info!("connectivity established, cleaning up");
+                            if let Some(checkpoint) = checkpoint {
+                                match checkpoint.commit().await {
+                                    Err(e) => warn!(%e, "error while committing checkpoint"),
+                                    Ok(_) => debug!("checkpoint committed"),
+                                }
+                            }
                         }
                         Err(e) => {
                             error!(%e, "deserialization error");

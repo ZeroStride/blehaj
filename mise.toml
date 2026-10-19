@@ -52,5 +52,5 @@ description = "Copy & Run using systemd-run"
 run = [
   "cross build --all --release ",
   "scp target/aarch64-unknown-linux-gnu/release/unnamed {{ vars.destination_user_at_host }}:~/",
-  "ssh {{ vars.destination_user_at_host }} -t 'systemd-run -p Group=netdev -p ConfigurationDirectory=unnamed -p ConfigurationDirectoryMode=0555 -p RestrictRealtime=yes -p MemoryDenyWriteExecute=yes --pipe --pty /opt/unnamed/bin/unnamed wlan0'"
+  "ssh {{ vars.destination_user_at_host }} -t 'systemd-run -p Group=netdev -p ConfigurationDirectory=unnamed -p ConfigurationDirectoryMode=0555 -p RestrictRealtime=yes -p MemoryDenyWriteExecute=yes -p NoNewPrivileges=yes -p ProtectSystem=strict -p ProtectHome=read-only -p PrivateTmp=yes -p RemoveIPC=yes --setenv RUST_LOG=warn,unnamed=debug --pipe --pty ~/unnamed --no-journald --qr-code-url-prefix \"http://localhost:3000/?uuid=\" wlan0'"
 ]

@@ -31,6 +31,7 @@ pub struct Configuration {
     pub network_interface: String,
     pub exit_after_configuration: bool,
     pub systemd_launched: bool,
+    pub no_journald: bool,
     pub qr_code_url_prefix: Option<String>,
 }
 
@@ -67,6 +68,7 @@ impl Configuration {
             network_interface: cli.interface,
             exit_after_configuration: cli.configuration,
             systemd_launched: std::os::unix::process::parent_id() == 1,
+            no_journald: cli.no_journald,
             qr_code_url_prefix: cli.qr_code_url_prefix.map(String::from),
         }
     }
@@ -112,6 +114,10 @@ mod ux {
         /// Static Bluetooth Service UUID
         #[arg(long)]
         pub service_uuid: Option<Uuid>,
+
+        /// Do not log to journald, even if launched via systemd (or systemd-run)
+        #[arg(long)]
+        pub no_journald: bool,
 
         /// Url prefix for QR Code Generation, e.g. "http://localhost:3000/?uuid="
         #[arg(long)]

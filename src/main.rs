@@ -51,6 +51,7 @@ async fn main() -> miette::Result<()> {
     let output_layer = if configuration.json {
         tracing_subscriber::fmt::layer().json().boxed()
     } else if configuration.systemd_launched
+        && !configuration.no_journald
         && let Ok(journald_layer) = tracing_journald::layer()
     {
         journald_layer

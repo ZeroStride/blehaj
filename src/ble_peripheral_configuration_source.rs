@@ -12,6 +12,8 @@ use ble_peripheral_rust::{
     },
 };
 use flate2::read::GzDecoder;
+use serde::Deserialize;
+use serde::Serialize;
 use std::io::prelude::*;
 use tokio::sync::{mpsc, mpsc::Receiver, oneshot::Sender};
 use tokio_util::{future::FutureExt, sync::CancellationToken};
@@ -19,6 +21,19 @@ use tracing::{debug, error, info, instrument};
 use uuid::{Uuid, uuid};
 
 const CONFIGURATION_CHARACTERISTIC_UUID: Uuid = uuid!("4b3bd2c3-2560-4353-8d37-05ca8333d01e");
+
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+struct BleConfigurationRequest {
+    pub identifier: String,
+}
+
+impl TryInto<Vec<u8>> for BleConfigurationRequest {
+    type Error = rmp_serde::encode::Error;
+
+    fn try_into(self) -> Result<Vec<u8>, Self::Error> {
+        rmp_serde::to_vec(&self)
+    }
+}
 
 pub struct BlePeripheralConfigurationSource {
     // session: bluer::Session,
@@ -74,6 +89,7 @@ impl BlePeripheralConfigurationSource {
             },
         })
     }
+
     #[instrument(skip(self))]
     async fn state_update(&self, is_powered: bool) {
         debug!("state update");
@@ -85,11 +101,24 @@ impl BlePeripheralConfigurationSource {
         request: PeripheralRequest,
         responder: Sender<ReadRequestResponse>,
     ) {
-        let value = String::from("ok");
-        debug!(value, "sending data to read_request");
+        let configuration_request = BleConfigurationRequest {
+            identifier: "it me".to_string(),
+        };
+        debug!(response = ?configuration_request, "responding to read_request");
+
+        // This is incredibly fragile and stupid, and I should really do some kind of minimal envelope
+        // which would allow errors to be reported back to the client
+        let value: Vec<u8> = match configuration_request.try_into() {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                error!(%e, "error serializing response");
+                e.to_string().into_bytes()
+            }
+        };
+
         if responder
             .send(ReadRequestResponse {
-                value: value.into(),
+                value,
                 response: RequestResponse::Success,
             })
             .is_err()

@@ -1,14 +1,28 @@
 {
     "folders": [
         {
-            "folder_exclude_patterns": ["target", "artifacts", "node_modules", "demo/dist"],
-            "binary_file_patterns": ["*/target/*", "*/artifacts/*", "*/node_modules/*", "bun.lock"],
+            "folder_exclude_patterns": [
+                "target",
+                "artifacts",
+                "node_modules",
+                "demo/dist"
+            ],
+            "binary_file_patterns": [
+                "*/target/*",
+                "*/artifacts/*",
+                "*/node_modules/*",
+                "bun.lock"
+            ],
             "path": ".."
         }
     ],
     "build_systems": [],
     "settings": {
-        // "rust_syntax_checking": false,
+        "lsp_format_on_paste": true,
+        "lsp_format_on_save": true,
+        "lsp_code_actions_on_save": {
+            "source.organizeImports": true, // LSP-tsgo
+        },
         "rust_syntax_checking_method": "clippy",
         "LSP": {
             "LSP-rust-analyzer": {
@@ -16,6 +30,15 @@
                     // "check.overrideCommand": ["cross", "check", "--message-format=json"],
                     // "cargo.buildScripts.overrideCommand": ["cross", "check", "--message-format=json"],
                 }
+            },
+            "LSP-tsgo": {
+                "settings": {
+                    "js/ts.format.semicolons": "remove",
+                    "js/ts.preferences.quoteStyle": "double",
+                }
+            },
+            "LSP-json": {
+                "settings": {}
             }
         }
     },

@@ -1,3 +1,4 @@
+use crate::configuration::{self};
 use ble_peripheral_rust::{
     Peripheral, PeripheralImpl,
     gatt::{
@@ -10,12 +11,12 @@ use ble_peripheral_rust::{
         service::Service,
     },
 };
+use flate2::read::GzDecoder;
+use std::io::prelude::*;
 use tokio::sync::{mpsc, mpsc::Receiver, oneshot::Sender};
 use tokio_util::{future::FutureExt, sync::CancellationToken};
 use tracing::{debug, error, info, instrument};
 use uuid::{Uuid, uuid};
-
-use crate::configuration::{self};
 
 const CONFIGURATION_CHARACTERISTIC_UUID: Uuid = uuid!("4b3bd2c3-2560-4353-8d37-05ca8333d01e");
 
@@ -82,7 +83,6 @@ impl BlePeripheralConfigurationSource {
     async fn read_request(
         &self,
         request: PeripheralRequest,
-        offset: usize,
         responder: Sender<ReadRequestResponse>,
     ) {
         let value = String::from("ok");
@@ -103,7 +103,6 @@ impl BlePeripheralConfigurationSource {
         &self,
         request: PeripheralRequest,
         value: Vec<u8>,
-        offset: usize,
         responder: Sender<WriteRequestResponse>,
     ) -> Option<Vec<u8>> {
         if responder
@@ -115,7 +114,18 @@ impl BlePeripheralConfigurationSource {
             error!("error sending write_request response, receiver dropped");
         }
         debug!("received data from write_request");
-        Some(value)
+        let mut decoder = GzDecoder::new(&value[..]);
+        let mut vec = Vec::new();
+        match decoder.read_to_end(&mut vec) {
+            Ok(inflated_size) => {
+                debug!(size = value.len(), inflated_size, "inflated bytes");
+                Some(vec)
+            }
+            Err(e) => {
+                error!(%e, "error inflating data");
+                None
+            }
+        }
     }
 
     #[instrument(skip(self))]
@@ -174,25 +184,20 @@ impl BlePeripheralConfigurationSource {
                 }
                 Some(PeripheralEvent::ReadRequest {
                     request,
-                    offset,
+                    offset: _,
                     responder,
                 }) => {
-                    self.read_request(request, offset as usize, responder).await;
+                    self.read_request(request, responder).await;
                 }
                 Some(PeripheralEvent::WriteRequest {
                     request,
                     value,
-                    offset,
+                    offset: _,
                     responder,
-                }) => {
-                    match self
-                        .write_request(request, value, offset as usize, responder)
-                        .await
-                    {
-                        None => {}
-                        Some(configuration_bytes) => return Ok(Some(configuration_bytes)),
-                    }
-                }
+                }) => match self.write_request(request, value, responder).await {
+                    None => {}
+                    Some(configuration_bytes) => return Ok(Some(configuration_bytes)),
+                },
                 Some(PeripheralEvent::CharacteristicSubscriptionUpdate {
                     request,
                     subscribed,

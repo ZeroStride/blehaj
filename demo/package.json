@@ -14,7 +14,8 @@
     "@types/web-bluetooth": "^0.0.21",
     "@yudiel/react-qr-scanner": "^2.6.0",
     "react": "^19",
-    "react-dom": "^19"
+    "react-dom": "^19",
+    "uuid": "^14.0.3"
   },
   "devDependencies": {
     "@types/react": "^19",

@@ -272,7 +272,7 @@ async fn main() -> miette::Result<()> {
                             }
                         }
                         Err(e) => {
-                            error!(%e, "deserialization error");
+                            error!(%e, utf8 = str::from_utf8(&configuration_bytes).unwrap_or("(error decoding to utf8)"), "deserialization error");
                         }
                     }
                 }

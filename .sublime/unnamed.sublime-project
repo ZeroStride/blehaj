@@ -27,6 +27,9 @@
         "LSP": {
             "LSP-rust-analyzer": {
                 "initialization_options": {
+                    "rustfmt.extraArgs": [
+                        "+nightly"
+                    ],
                     // "check.overrideCommand": ["cross", "check", "--message-format=json"],
                     // "cargo.buildScripts.overrideCommand": ["cross", "check", "--message-format=json"],
                 }

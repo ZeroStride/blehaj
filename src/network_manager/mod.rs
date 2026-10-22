@@ -190,7 +190,7 @@ impl NetworkManager<'_> {
         let system_bus_connection = Connection::system()
             .await
             .map_err(|e| Error::ZbusSystemConnection { source: e })?;
-        trace!(?system_bus_connection, "creating proxy");
+        trace!(system_bus_connection = ?system_bus_connection.unique_name(), "creating proxy");
         let proxy = NetworkManagerProxy::new(&system_bus_connection).await?;
         Ok(NetworkManager {
             _system_bus_connection: system_bus_connection,

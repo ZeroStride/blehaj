@@ -5,7 +5,7 @@ cargo-binstall = { version = "latest", lazy = true }
 "cargo:cargo-fmt-toml" = { version = "latest", lazy = true, lazy_bins = ['cargo'] }
 "cargo:cargo-nextest" = { version = "latest", lazy = true, lazy_bins = ['cargo'] }
 "cargo:systemd-lsp" = { version = "latest", lazy = true, lazy_bins = ['systemd-lsp'] }
-rust = { version = "1.89", profile = "minimal", components = "rustfmt,clippy", lazy = true }
+rust = { version = "1.95", profile = "minimal", components = "rustfmt,clippy", lazy = true }
 
 [env]
 CROSS_CONTAINER_UID = 0
@@ -28,7 +28,7 @@ run = "cargo deny check"
 description = "Lint the rust code"
 run = [
   "cross fmt-toml --check --quiet",
-  "cross fmt --all -- --check",
+  "cross +nightly fmt --all -- --check",
   "cross clippy --workspace --all-targets",
 ]
 wait_for = ["deny"]
@@ -47,10 +47,11 @@ run = [
   "ssh {{ vars.destination_user_at_host }} -t 'curl -s https://raw.githubusercontent.com/NetworkManager/NetworkManager/refs/heads/main/introspection/org.freedesktop.NetworkManager.xml | zbus-xmlgen -o - file -' > {{ config_root }}/src/network_manager/generated/network_manager.rs"
 ]
 
+# Change --quiet to --pipe when copy/pasting it
 [tasks.rr]
 description = "Copy & Run using systemd-run"
 run = [
   "cross build --all --release ",
   "scp target/aarch64-unknown-linux-gnu/release/unnamed {{ vars.destination_user_at_host }}:~/",
-  "ssh {{ vars.destination_user_at_host }} -t 'systemd-run -p Group=netdev -p ConfigurationDirectory=unnamed -p ConfigurationDirectoryMode=0555 -p RestrictRealtime=yes -p MemoryDenyWriteExecute=yes -p NoNewPrivileges=yes -p ProtectSystem=strict -p ProtectHome=read-only -p PrivateTmp=yes -p RemoveIPC=yes --setenv RUST_LOG=warn,unnamed=debug --pipe --pty ~/unnamed --no-journald --qr-code-url-prefix \"http://localhost:3000/?uuid=\" wlan0'"
+  "ssh {{ vars.destination_user_at_host }} -t 'sudo systemd-run -p Group=netdev -p LoadCredentialEncrypted=unnamed_ed25519 -p RestrictRealtime=yes -p MemoryDenyWriteExecute=yes -p NoNewPrivileges=yes -p ProtectSystem=strict -p ProtectHome=read-only -p PrivateTmp=yes -p RemoveIPC=yes --quiet --pty --send-sighup ~/unnamed --signing-key \"\\${CREDENTIALS_DIRECTORY}/unnamed_ed25519\" --no-journald --qr-code-url-prefix \"http://localhost:3000/?uuid=\" wlan0'"
 ]

@@ -21,6 +21,9 @@ mod configuration;
 mod error;
 mod network_manager;
 
+#[cfg(feature = "digest")]
+mod digest;
+
 #[tokio::main]
 async fn main() -> miette::Result<()> {
     miette::set_panic_hook();
@@ -76,6 +79,20 @@ async fn main() -> miette::Result<()> {
         .init();
 
     info!(version = crate_version!(), ?configuration, "starting");
+
+    #[cfg(feature = "digest")]
+    {
+        if let Some(ref signing_key) = configuration.signing_key {
+            info!(
+                verify_key = hex::encode(signing_key.verifying_key().to_bytes()),
+                "using signed requests"
+            );
+        } else {
+            warn!(
+                "provide a signing key with `--signing-key` in order to send signed requests; using unsigned requests`"
+            )
+        }
+    }
 
     //
     // Establish D-Bus connection, catch some errors I've run into

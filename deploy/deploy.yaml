@@ -4,11 +4,11 @@
   tasks:
   - block:
       - name: make /opt/{{ project_name }}/lib
-        file: 
+        ansible.builtin.file:
           path: "/opt/{{ project_name }}/lib"
           state: directory
       - name: make /opt/{{ project_name }}/bin
-        file: 
+        ansible.builtin.file:
           path: "/opt/{{ project_name }}/bin"
           state: directory
       - name: copy service description to /opt/{{ project_name }}/lib

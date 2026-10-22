@@ -4,21 +4,17 @@ After=multi-user.target network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/unnamed wlan0
+ExecStart=/usr/local/bin/unnamed --signing-key "${CREDENTIALS_DIRECTORY}/unnamed_ed25519" --qr-code-url-prefix "http://localhost:3000/?uuid=" wlan0
 Environment="RUST_LOG=warn,unnamed=debug"
 Restart=on-failure
-
 # Dynamic User causes an I/O error
 # DynamicUser=yes
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=yes
 RemoveIPC=yes
-
 Group=netdev
-ConfigurationDirectory=unnamed
-ConfigurationDirectoryMode=0555
-
+LoadCredentialEncrypted=unnamed_ed25519
 RestrictRealtime=yes
 MemoryDenyWriteExecute=yes
 NoNewPrivileges=yes

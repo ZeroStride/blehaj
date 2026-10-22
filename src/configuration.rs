@@ -1,6 +1,7 @@
 use std::fmt;
 
 use clap::Parser;
+use derive_more::Debug;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -33,20 +34,16 @@ pub struct Configuration {
     pub systemd_launched: bool,
     pub no_journald: bool,
     pub qr_code_url_prefix: Option<String>,
+    #[cfg(feature = "digest")]
+    #[serde(skip)]
+    #[debug(skip)]
+    pub signing_key: Option<ed25519_dalek::SigningKey>,
 }
 
 impl Configuration {
+    #[allow(clippy::print_stderr)]
     pub fn new() -> Self {
         let cli = ux::Cli::parse();
-
-        #[cfg(feature = "qrcode")]
-        {
-            use tracing::warn;
-
-            if cli.qr_code_url_prefix.is_some() {
-                warn!("QR Code Generation feature is disabled, build with feature 'qrcode.");
-            }
-        }
 
         Configuration {
             json: cli.json,
@@ -70,6 +67,8 @@ impl Configuration {
             systemd_launched: std::os::unix::process::parent_id() == 1,
             no_journald: cli.no_journald,
             qr_code_url_prefix: cli.qr_code_url_prefix.map(String::from),
+            #[cfg(feature = "digest")]
+            signing_key: cli.signing_key,
         }
     }
 }
@@ -120,7 +119,13 @@ mod ux {
         pub no_journald: bool,
 
         /// Url prefix for QR Code Generation, e.g. "http://localhost:3000/?uuid="
+        #[cfg(feature = "qrcode")]
         #[arg(long)]
         pub qr_code_url_prefix: Option<Url>,
+
+        /// Private key used to sign requests for configuration. Note: Only ed25519 keys are supported, currently.
+        #[cfg(feature = "digest")]
+        #[arg(long, value_parser = crate::digest::parse_signing_key)]
+        pub signing_key: Option<ed25519_dalek::SigningKey>,
     }
 }

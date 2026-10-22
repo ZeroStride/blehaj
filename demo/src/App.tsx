@@ -1,5 +1,5 @@
 /// <reference types="web-bluetooth" />
-import { decode } from "@msgpack/msgpack"
+/// <reference types="sshpk" />
 import { Scanner, type IDetectedBarcode } from "@yudiel/react-qr-scanner"
 import { useState } from "react"
 import { APITester } from "./APITester"
@@ -7,6 +7,7 @@ import "./index.css"
 import logo from "./logo.svg"
 import { NetworkManagerConnectionBuilder } from "./networkManagerConnection"
 import reactLogo from "./react.svg"
+
 export function App() {
   const CONFIGURATION_CHARACTERISTIC_UUID = "4b3bd2c3-2560-4353-8d37-05ca8333d01e"
   const queryParams = new URLSearchParams(window.location.search)
@@ -48,8 +49,25 @@ export function App() {
             return characteristic?.readValue()
           })
           .then(value => {
-            const response = decode(value)
-            console.log(`Requirements: ${response}`)
+            if (!value) {
+              throw new Error("characteristic.readValue() was empty")
+            }
+
+            const request = new Request("/api/configuration", {
+              method: "POST",
+              headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+              },
+              body: value,
+            })
+            return fetch(request)
+          })
+          .then(response => {
+            if (!response.body) {
+              throw new Error("response body was empty")
+            }
+            console.log(response.body)
           })
           .catch((error) => console.error(`Something went wrong. ${error}`))
       }}>Do the Bluetooth Things</button>)}

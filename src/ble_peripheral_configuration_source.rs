@@ -1,4 +1,5 @@
-use crate::configuration::{self};
+use std::io::prelude::*;
+
 use ble_peripheral_rust::{
     Peripheral, PeripheralImpl,
     gatt::{
@@ -11,23 +12,40 @@ use ble_peripheral_rust::{
         service::Service,
     },
 };
+#[cfg(feature = "digest")]
+use ed25519_dalek::Signer;
 use flate2::read::GzDecoder;
-use serde::Deserialize;
-use serde::Serialize;
-use std::io::prelude::*;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, mpsc::Receiver, oneshot::Sender};
 use tokio_util::{future::FutureExt, sync::CancellationToken};
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, instrument, warn};
 use uuid::{Uuid, uuid};
+
+use crate::configuration::{self};
 
 const CONFIGURATION_CHARACTERISTIC_UUID: Uuid = uuid!("4b3bd2c3-2560-4353-8d37-05ca8333d01e");
 
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-struct BleConfigurationRequest {
+#[derive(Debug, Deserialize, Serialize)]
+struct BleRequest {
     pub identifier: String,
+    pub data: Vec<u8>,
 }
 
-impl TryInto<Vec<u8>> for BleConfigurationRequest {
+#[derive(Deserialize, Serialize)]
+struct BleEnvelope {
+    pub signature: String, // [u8; 64],
+    pub request: Vec<u8>,
+}
+
+impl TryInto<Vec<u8>> for BleEnvelope {
+    type Error = rmp_serde::encode::Error;
+
+    fn try_into(self) -> Result<Vec<u8>, Self::Error> {
+        rmp_serde::to_vec(&self)
+    }
+}
+
+impl TryInto<Vec<u8>> for BleRequest {
     type Error = rmp_serde::encode::Error;
 
     fn try_into(self) -> Result<Vec<u8>, Self::Error> {
@@ -42,9 +60,12 @@ pub struct BlePeripheralConfigurationSource {
     event_rx: Receiver<PeripheralEvent>,
     service: Service,
     qr_code_url_prefix: Option<String>,
+    #[cfg(feature = "digest")]
+    signing_key: Option<ed25519_dalek::SigningKey>,
 }
 
 impl BlePeripheralConfigurationSource {
+    #[instrument]
     pub async fn new_from_configuration(
         configuration: &configuration::Configuration,
     ) -> Result<Self, ble_peripheral_rust::error::Error> {
@@ -87,6 +108,8 @@ impl BlePeripheralConfigurationSource {
                     ..Default::default()
                 }],
             },
+            #[cfg(feature = "digest")]
+            signing_key: configuration.signing_key.clone(), // Todo - Shouldn't really be cloning this, probably
         })
     }
 
@@ -101,24 +124,56 @@ impl BlePeripheralConfigurationSource {
         request: PeripheralRequest,
         responder: Sender<ReadRequestResponse>,
     ) {
-        let configuration_request = BleConfigurationRequest {
-            identifier: "it me".to_string(),
+        let configuration_request = BleRequest {
+            identifier: Uuid::new_v4().to_string(),
+            data: "it me".to_string().into(),
         };
         debug!(response = ?configuration_request, "responding to read_request");
 
-        // This is incredibly fragile and stupid, and I should really do some kind of minimal envelope
-        // which would allow errors to be reported back to the client
-        let value: Vec<u8> = match configuration_request.try_into() {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                error!(%e, "error serializing response");
-                e.to_string().into_bytes()
+        let value = cfg_select! {
+            feature = "digest" => {
+                if let Some(ref signing_key) = self.signing_key {
+                    let bytes_to_sign: Vec<u8> = configuration_request
+                        .try_into()
+                        .expect("serialization failed");
+                    match signing_key.try_sign(&bytes_to_sign) {
+                        Ok(sig) => {
+                            let sig = hex::encode(sig.to_bytes());
+                            debug!(sig, "signature");
+                            BleEnvelope {
+                                signature: sig,
+                                request: bytes_to_sign,
+                            }
+                        }
+                        Err(e) => {
+                            error!(%e, "error while signing payload");
+                            BleEnvelope {
+                                signature: String::new(),
+                                request: bytes_to_sign,
+                            }
+                        }
+                    }
+                } else {
+                    warn!("no signing key provided, responses are unsigned");
+                    BleEnvelope {
+                        signature: String::new(),
+                        request: configuration_request
+                            .try_into()
+                            .expect("serialization failed"),
+                    }
+                }
             }
+            _ => BleEnvelope {
+                signature: String::new(),
+                request: configuration_request
+                    .try_into()
+                    .expect("serialization failed"),
+            },
         };
 
         if responder
             .send(ReadRequestResponse {
-                value,
+                value: value.try_into().expect("serialization failed"),
                 response: RequestResponse::Success,
             })
             .is_err()

@@ -1,3 +1,6 @@
+[settings]
+idiomatic_version_file_enable_tools = ["rust"]
+
 [tools]
 cargo-binstall = { version = "latest", lazy = true }
 "cargo:cargo-cross" = { version = "latest", lazy = true, lazy_bins = ['cross'] }
@@ -5,7 +8,6 @@ cargo-binstall = { version = "latest", lazy = true }
 "cargo:cargo-fmt-toml" = { version = "latest", lazy = true, lazy_bins = ['cargo'] }
 "cargo:cargo-nextest" = { version = "latest", lazy = true, lazy_bins = ['cargo'] }
 "cargo:systemd-lsp" = { version = "latest", lazy = true, lazy_bins = ['systemd-lsp'] }
-rust = { version = "1.95", profile = "minimal", components = "rustfmt,clippy", lazy = true }
 
 [env]
 CROSS_CONTAINER_UID = 0

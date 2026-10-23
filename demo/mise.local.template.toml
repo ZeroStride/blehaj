@@ -1,3 +1,0 @@
-[env]
-PUBLIC_URL = "/"
-NODE_ENV = { default = "development" }

@@ -6,10 +6,10 @@ uv = { version = "0.12.18", lazy = true }
 [tasks.setup]
 description = "Run the setup playbook"
 run = [
-	"ansible-playbook setup.yaml",
-	"mise deploy"
+    "ansible-playbook setup.yaml",
+    "mise deploy"
 ]
 
 [tasks.deploy]
 description = "Run the deploy playbook"
-run = "ansible-playbook deploy.yaml --extra-vars project_name=unnamed"
+run = "ansible-playbook deploy.yaml --extra-vars project_name=blehaj"

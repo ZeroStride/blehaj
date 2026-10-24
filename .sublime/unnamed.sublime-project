@@ -8,6 +8,7 @@
             "binary_file_patterns": [
                 "*/target/*",
                 "*/artifacts/*",
+                "Cargo.lock"
             ],
             "path": ".."
         }

@@ -1,11 +1,11 @@
 [Unit]
-Description=Unnamed Network Configuration Automation Project
+Description=Blehaj Configuration Service
 After=multi-user.target network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/unnamed --signing-key "${CREDENTIALS_DIRECTORY}/unnamed_ed25519" --qr-code-url-prefix "http://localhost:3000/?uuid=" wlan0
-Environment="RUST_LOG=warn,unnamed=debug"
+ExecStart=/usr/local/bin/blehaj --signing-key "${CREDENTIALS_DIRECTORY}/unnamed_ed25519" --qr-code-url-prefix "http://localhost:3000/?uuid=" wlan0
+Environment="RUST_LOG=warn,blehaj=debug"
 Restart=on-failure
 # Dynamic User causes an I/O error
 # DynamicUser=yes

@@ -1,4 +1,4 @@
-# unnamed
+# blehaj 🦈
 
 ## Signing the Configuration Request
 
@@ -10,8 +10,9 @@ More information can be found here: https://systemd.io/CREDENTIALS/
 
 ## Todo
 
-- [ ] Come up with a name
-- [ ] https://bun.com/guides/ecosystem/docker
+- [x] Come up with a name
+- [ ] Rename the damn keys from `unnamed_ed25519` to something else
+- [ ] Move to Codeberg?
 
 # Other Interesting Things
 

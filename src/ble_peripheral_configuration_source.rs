@@ -235,7 +235,7 @@ impl BlePeripheralConfigurationSource {
 
         info!(%self.service.uuid, "advertising service");
         self.peripheral
-            .start_advertising("unnamed-todo-add-setting", &[self.service.uuid])
+            .start_advertising("blehaj-todo-add-setting", &[self.service.uuid])
             .await?;
 
         #[cfg(feature = "qrcode")]

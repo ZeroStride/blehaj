@@ -26,30 +26,37 @@ use crate::configuration::{self};
 const CONFIGURATION_CHARACTERISTIC_UUID: Uuid = uuid!("4b3bd2c3-2560-4353-8d37-05ca8333d01e");
 
 #[derive(Debug, Deserialize, Serialize)]
-struct BleRequest {
+enum Request {
+    NetworkManagerConfiguration { interface: String },
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct Envelope {
     pub identifier: String,
-    pub data: Vec<u8>,
+    pub cypher: String,
+    pub data: Request,
 }
 
 #[derive(Deserialize, Serialize)]
-struct BleEnvelope {
-    pub signature: String, // [u8; 64],
-    pub request: Vec<u8>,
+struct SignedPayload {
+    pub signature: String,
+    #[serde(with = "serde_bytes")]
+    pub payload: Vec<u8>,
 }
 
-impl TryInto<Vec<u8>> for BleEnvelope {
+impl TryInto<Vec<u8>> for SignedPayload {
     type Error = rmp_serde::encode::Error;
 
     fn try_into(self) -> Result<Vec<u8>, Self::Error> {
-        rmp_serde::to_vec(&self)
+        rmp_serde::to_vec_named(&self)
     }
 }
 
-impl TryInto<Vec<u8>> for BleRequest {
+impl TryInto<Vec<u8>> for Envelope {
     type Error = rmp_serde::encode::Error;
 
     fn try_into(self) -> Result<Vec<u8>, Self::Error> {
-        rmp_serde::to_vec(&self)
+        rmp_serde::to_vec_named(&self)
     }
 }
 
@@ -120,9 +127,12 @@ impl BlePeripheralConfigurationSource {
         request: PeripheralRequest,
         responder: Sender<ReadRequestResponse>,
     ) {
-        let configuration_request = BleRequest {
+        let configuration_request = Envelope {
             identifier: Uuid::new_v4().to_string(),
-            data: "it me".to_string().into(),
+            cypher: "none".to_owned(),
+            data: Request::NetworkManagerConfiguration {
+                interface: self.configuration.network_interface.clone(),
+            },
         };
         debug!(response = ?configuration_request, "responding to read_request");
 
@@ -136,24 +146,24 @@ impl BlePeripheralConfigurationSource {
                         Ok(sig) => {
                             let sig = hex::encode(sig.to_bytes());
                             debug!(sig, "signature");
-                            BleEnvelope {
+                            SignedPayload {
                                 signature: sig,
-                                request: bytes_to_sign,
+                                payload: bytes_to_sign,
                             }
                         }
                         Err(e) => {
                             error!(%e, "error while signing payload");
-                            BleEnvelope {
+                            SignedPayload {
                                 signature: String::new(),
-                                request: bytes_to_sign,
+                                payload: bytes_to_sign,
                             }
                         }
                     }
                 } else {
                     warn!("no signing key provided, responses are unsigned");
-                    BleEnvelope {
+                    SignedPayload {
                         signature: String::new(),
-                        request: configuration_request
+                        payload: configuration_request
                             .try_into()
                             .expect("serialization failed"),
                     }

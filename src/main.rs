@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::IsTerminal, time::Duration};
+use std::{collections::HashMap, io::IsTerminal, sync::Arc, time::Duration};
 
 use clap::{crate_name, crate_version};
 use miette::IntoDiagnostic;
@@ -28,7 +28,7 @@ mod digest;
 async fn main() -> miette::Result<()> {
     miette::set_panic_hook();
 
-    let configuration = configuration::Configuration::new();
+    let configuration = Arc::new(configuration::Configuration::new());
 
     if configuration.json {
         miette::set_hook(Box::new(|_| Box::new(miette::JSONReportHandler)))?;
@@ -43,7 +43,7 @@ async fn main() -> miette::Result<()> {
     #[allow(clippy::print_stdout)]
     if configuration.exit_after_configuration {
         if configuration.json {
-            serde_json::to_writer(std::io::stdout(), &configuration).into_diagnostic()?;
+            serde_json::to_writer(std::io::stdout(), &*configuration).into_diagnostic()?;
         } else {
             println!("{:?}", configuration);
         }
@@ -143,7 +143,7 @@ async fn main() -> miette::Result<()> {
 
     // Todo - This should actually be configurable
     let configuration_source =
-        BlePeripheralConfigurationSource::new_from_configuration(&configuration)
+        BlePeripheralConfigurationSource::new_from_configuration(configuration)
             .await
             .into_diagnostic()?;
 

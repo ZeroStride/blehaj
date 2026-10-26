@@ -1,4 +1,4 @@
-use std::io::prelude::*;
+use std::{io::prelude::*, sync::Arc};
 
 use ble_peripheral_rust::{
     Peripheral, PeripheralImpl,
@@ -59,15 +59,13 @@ pub struct BlePeripheralConfigurationSource {
     peripheral: Peripheral,
     event_rx: Receiver<PeripheralEvent>,
     service: Service,
-    qr_code_url_prefix: Option<String>,
-    #[cfg(feature = "digest")]
-    signing_key: Option<ed25519_dalek::SigningKey>,
+    configuration: Arc<configuration::Configuration>,
 }
 
 impl BlePeripheralConfigurationSource {
     #[instrument]
     pub async fn new_from_configuration(
-        configuration: &configuration::Configuration,
+        configuration: Arc<configuration::Configuration>,
     ) -> Result<Self, ble_peripheral_rust::error::Error> {
         //bluer::Error> {
         // info!("initializing bluetooth session");
@@ -89,7 +87,6 @@ impl BlePeripheralConfigurationSource {
         Ok(BlePeripheralConfigurationSource {
             peripheral,
             event_rx,
-            qr_code_url_prefix: configuration.qr_code_url_prefix.clone(),
             service: Service {
                 uuid: configuration.bluetooth_service_uuid,
                 primary: true,
@@ -108,8 +105,7 @@ impl BlePeripheralConfigurationSource {
                     ..Default::default()
                 }],
             },
-            #[cfg(feature = "digest")]
-            signing_key: configuration.signing_key.clone(), // Todo - Shouldn't really be cloning this, probably
+            configuration,
         })
     }
 
@@ -132,7 +128,7 @@ impl BlePeripheralConfigurationSource {
 
         let value = cfg_select! {
             feature = "digest" => {
-                if let Some(ref signing_key) = self.signing_key {
+                if let Some(ref signing_key) = self.configuration.signing_key {
                     let bytes_to_sign: Vec<u8> = configuration_request
                         .try_into()
                         .expect("serialization failed");
@@ -239,7 +235,7 @@ impl BlePeripheralConfigurationSource {
             .await?;
 
         #[cfg(feature = "qrcode")]
-        if let Some(ref qr_code_url_prefix) = self.qr_code_url_prefix {
+        if let Some(ref qr_code_url_prefix) = self.configuration.qr_code_url_prefix {
             use qrcode_generator::{
                 Renderer,
                 qr::{Encoder, ErrorCorrection},

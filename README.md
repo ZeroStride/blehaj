@@ -13,6 +13,7 @@ More information can be found here: https://systemd.io/CREDENTIALS/
 - [x] Come up with a name
 - [ ] Rename the damn keys from `unnamed_ed25519` to something else
 - [ ] Move to Codeberg?
+- [ ] Add actual encryption to the configuration request, instead of just digest signing (optional?)
 
 # Other Interesting Things
 

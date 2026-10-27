@@ -1,4 +1,4 @@
-use std::{io::prelude::*, sync::Arc};
+use std::sync::Arc;
 
 use ble_peripheral_rust::{
     Peripheral, PeripheralImpl,
@@ -14,12 +14,12 @@ use ble_peripheral_rust::{
 };
 #[cfg(feature = "digest")]
 use ed25519_dalek::Signer;
-use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, mpsc::Receiver, oneshot::Sender};
 use tokio_util::{future::FutureExt, sync::CancellationToken};
 use tracing::{debug, error, info, instrument, warn};
 use uuid::{Uuid, uuid};
+use zstd::bulk;
 
 use crate::configuration::{self};
 
@@ -177,9 +177,11 @@ impl BlePeripheralConfigurationSource {
             },
         };
 
+        let value: Vec<u8> = value.try_into().expect("serialization failed");
+        let value = bulk::compress(&value, 0).expect("zstd compression failed");
         if responder
             .send(ReadRequestResponse {
-                value: value.try_into().expect("serialization failed"),
+                value,
                 response: RequestResponse::Success,
             })
             .is_err()
@@ -204,15 +206,15 @@ impl BlePeripheralConfigurationSource {
             error!("error sending write_request response, receiver dropped");
         }
         debug!("received data from write_request");
-        let mut decoder = GzDecoder::new(&value[..]);
-        let mut vec = Vec::new();
-        match decoder.read_to_end(&mut vec) {
-            Ok(inflated_size) => {
-                debug!(size = value.len(), inflated_size, "inflated bytes");
-                Some(vec)
-            }
+
+        let mut output = match zstd::decompressed_size(&value) {
+            Some(size) => Vec::with_capacity(size as usize),
+            None => Vec::new(),
+        };
+        match bulk::decompress_to_buffer(&value, &mut output) {
+            Ok(_size) => Some(output),
             Err(e) => {
-                error!(%e, "error inflating data");
+                error!(%e, "error while decompressing");
                 None
             }
         }

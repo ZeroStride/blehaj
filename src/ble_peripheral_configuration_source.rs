@@ -34,7 +34,7 @@ enum Request {
 struct Envelope {
     pub identifier: String,
     pub algorithm: String,
-    pub data: Request,
+    pub request: Request,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -130,7 +130,7 @@ impl BlePeripheralConfigurationSource {
         let configuration_request = Envelope {
             identifier: Uuid::new_v4().to_string(),
             algorithm: "ed25519".to_owned(),
-            data: Request::NetworkManagerConfiguration {
+            request: Request::NetworkManagerConfiguration {
                 interface: self.configuration.network_interface.clone(),
             },
         };

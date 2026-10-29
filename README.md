@@ -1,5 +1,7 @@
 # blehaj 🦈
 
+For the server-side implementation, and web app see [blehaj-backend](https://github.com/ZeroStride/blehaj-backend)
+
 ## Signing the Configuration Request
 
 When making a configuration request, it can optionally include a digest that is signed with a provided private key. This allows the server to verify the identity of the configuration request.

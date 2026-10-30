@@ -50,3 +50,34 @@ pub fn parse_signing_key(s: &str) -> Result<ed25519_dalek::SigningKey, clap::Err
     };
     Err(err)
 }
+
+pub fn parse_verifying_key(s: &str) -> Result<ed25519_dalek::VerifyingKey, clap::Error> {
+    let mut err = clap::Error::new(ErrorKind::ValueValidation);
+    err.insert(
+        ContextKind::InvalidValue,
+        ContextValue::String(s.to_owned()),
+    );
+
+    match ssh_key::PublicKey::from_openssh(s) {
+        Ok(key) => {
+            if let Some(key) = key.key_data().ed25519() {
+                match ed25519_dalek::VerifyingKey::from_bytes(&key.0) {
+                    Ok(key) => return Ok(key),
+                    Err(e) => {
+                        err.insert(ContextKind::Suggested, ContextValue::String(e.to_string()));
+                    }
+                }
+            } else {
+                err.insert(
+                    ContextKind::Suggested,
+                    ContextValue::String("only ed25519 keys are supported currently".to_owned()),
+                );
+            }
+        }
+        Err(e) => {
+            err.insert(ContextKind::Suggested, ContextValue::String(e.to_string()));
+        }
+    }
+
+    Err(err)
+}

@@ -102,7 +102,7 @@ impl BlePeripheralConfigurationSource {
                     properties: vec![
                         CharacteristicProperty::Read,
                         CharacteristicProperty::Write,
-                        CharacteristicProperty::Notify,
+                        CharacteristicProperty::WriteWithoutResponse,
                     ],
                     permissions: vec![
                         AttributePermission::Readable,
@@ -179,6 +179,7 @@ impl BlePeripheralConfigurationSource {
 
         let value: Vec<u8> = value.try_into().expect("serialization failed");
         let value = bulk::compress(&value, 0).expect("zstd compression failed");
+        debug!(len = value.len(), "writing compressed response");
         if responder
             .send(ReadRequestResponse {
                 value,
@@ -192,32 +193,27 @@ impl BlePeripheralConfigurationSource {
 
     #[instrument(skip(self, value, responder))]
     async fn write_request(
-        &self,
+        &mut self,
         request: PeripheralRequest,
         value: Vec<u8>,
         responder: Sender<WriteRequestResponse>,
     ) -> Option<Vec<u8>> {
-        if responder
-            .send(WriteRequestResponse {
-                response: RequestResponse::Success,
-            })
-            .is_err()
-        {
-            error!("error sending write_request response, receiver dropped");
-        }
         debug!("received data from write_request");
 
-        let mut output = match zstd::decompressed_size(&value) {
-            Some(size) => Vec::with_capacity(size as usize),
-            None => Vec::new(),
-        };
-        match bulk::decompress_to_buffer(&value, &mut output) {
-            Ok(_size) => Some(output),
+        // Max size is 512 bytes (MTU for Bluetooth) * 5 (better ratio than zstd could hope for)
+        let (ret, response) = match bulk::decompress(&value, 512 * 5) {
+            Ok(output) => (Some(output), RequestResponse::Success),
             Err(e) => {
-                error!(%e, "error while decompressing");
-                None
+                error!(%e, "zstd decompression failed");
+                (None, RequestResponse::UnlikelyError)
             }
+        };
+
+        if responder.send(WriteRequestResponse { response }).is_err() {
+            error!("error sending write_request response, receiver dropped");
         }
+
+        ret
     }
 
     #[instrument(skip(self))]
@@ -263,45 +259,49 @@ impl BlePeripheralConfigurationSource {
             info!(%url, "running...\n{:#}", renderer);
         }
 
-        while let Some(event) = self
-            .event_rx
-            .recv()
-            .with_cancellation_token(&cancellation_token)
-            .await
-        {
-            match event {
-                None => break,
-                Some(PeripheralEvent::StateUpdate { is_powered }) => {
-                    self.state_update(is_powered).await
-                }
-                Some(PeripheralEvent::ReadRequest {
-                    request,
-                    offset: _,
-                    responder,
-                }) => {
-                    self.read_request(request, responder).await;
-                }
-                Some(PeripheralEvent::WriteRequest {
-                    request,
-                    value,
-                    offset: _,
-                    responder,
-                }) => match self.write_request(request, value, responder).await {
-                    None => {}
-                    Some(configuration_bytes) => return Ok(Some(configuration_bytes)),
-                },
-                Some(PeripheralEvent::CharacteristicSubscriptionUpdate {
-                    request,
-                    subscribed,
-                }) => {
-                    if subscribed {
-                        self.subscribed(request).await;
-                    } else {
-                        self.unsubscribed(request).await;
+        let result = loop {
+            if let Some(event) = self
+                .event_rx
+                .recv()
+                .with_cancellation_token(&cancellation_token)
+                .await
+            {
+                match event {
+                    None => break Ok(None),
+                    Some(PeripheralEvent::StateUpdate { is_powered }) => {
+                        self.state_update(is_powered).await
+                    }
+                    Some(PeripheralEvent::ReadRequest {
+                        request,
+                        offset: _,
+                        responder,
+                    }) => {
+                        self.read_request(request, responder).await;
+                    }
+                    Some(PeripheralEvent::WriteRequest {
+                        request,
+                        value,
+                        offset: _,
+                        responder,
+                    }) => match self.write_request(request, value, responder).await {
+                        None => {}
+                        Some(configuration_bytes) => break Ok(Some(configuration_bytes)),
+                    },
+                    Some(PeripheralEvent::CharacteristicSubscriptionUpdate {
+                        request,
+                        subscribed,
+                    }) => {
+                        if subscribed {
+                            self.subscribed(request).await;
+                        } else {
+                            self.unsubscribed(request).await;
+                        }
                     }
                 }
             }
-        }
-        Ok(None)
+        };
+        let _ = self.peripheral.stop_advertising().await;
+        drop(self.peripheral);
+        result
     }
 }

@@ -38,6 +38,10 @@ pub struct Configuration {
     #[serde(skip)]
     #[debug(skip)]
     pub signing_key: Option<ed25519_dalek::SigningKey>,
+    #[cfg(feature = "digest")]
+    #[serde(skip)]
+    #[debug(skip)]
+    pub verifying_key: Option<ed25519_dalek::VerifyingKey>,
 }
 
 impl Configuration {
@@ -69,6 +73,8 @@ impl Configuration {
             qr_code_url_prefix: cli.qr_code_url_prefix.map(String::from),
             #[cfg(feature = "digest")]
             signing_key: cli.signing_key,
+            #[cfg(feature = "digest")]
+            verifying_key: cli.verifying_key,
         }
     }
 }
@@ -123,9 +129,14 @@ mod ux {
         #[arg(long)]
         pub qr_code_url_prefix: Option<Url>,
 
-        /// Private key used to sign requests for configuration. Note: Only ed25519 keys are supported, currently.
+        /// Ed25519 private key used to sign requests for configuration.
         #[cfg(feature = "digest")]
         #[arg(long, value_parser = crate::digest::parse_signing_key)]
         pub signing_key: Option<ed25519_dalek::SigningKey>,
+
+        /// Ed25519 public key used to verify signatures from the configuration server.
+        #[cfg(feature = "digest")]
+        #[arg(long, value_parser = crate::digest::parse_verifying_key)]
+        pub verifying_key: Option<ed25519_dalek::VerifyingKey>,
     }
 }

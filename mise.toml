@@ -55,5 +55,5 @@ description = "Copy & Run using systemd-run"
 run = [
   "cross build --all --release ",
   "scp target/aarch64-unknown-linux-gnu/release/blehaj {{ vars.destination_user_at_host }}:~/",
-  "ssh {{ vars.destination_user_at_host }} -t 'sudo systemd-run -p Group=netdev -p LoadCredentialEncrypted=unnamed_ed25519 -p RestrictRealtime=yes -p MemoryDenyWriteExecute=yes -p NoNewPrivileges=yes -p ProtectSystem=strict -p ProtectHome=read-only -p PrivateTmp=yes -p RemoveIPC=yes --quiet --pty --send-sighup ~/blehaj --signing-key \"\\${CREDENTIALS_DIRECTORY}/unnamed_ed25519\" --no-journald --qr-code-url-prefix \"http://localhost:3000/\" wlan0'"
+  "ssh {{ vars.destination_user_at_host }} -t 'sudo systemd-run -p Group=netdev -p LoadCredentialEncrypted=unnamed_ed25519 -p RestrictRealtime=yes -p MemoryDenyWriteExecute=yes -p NoNewPrivileges=yes -p ProtectSystem=strict -p ProtectHome=read-only -p PrivateTmp=yes -p RemoveIPC=yes --quiet --pty --send-sighup ~/blehaj --signing-key \"\\${CREDENTIALS_DIRECTORY}/unnamed_ed25519\" --no-journald --qr-code-url-prefix \"https://blehaj.org/\" --verifying-key \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM+zU6RvlX7x9bFR66jCLakmCCWyl0PcYvmOqqVrgp34\" --service-uuid cadf5f5e-4549-448d-a12f-f88cba002ec1 wlan0'"
 ]

@@ -2,6 +2,7 @@ use std::{collections::HashMap, io::IsTerminal, sync::Arc, time::Duration};
 
 use clap::{crate_name, crate_version};
 use miette::IntoDiagnostic;
+use serde::{Deserialize, Serialize};
 use tokio::{
     signal::unix::{SignalKind, signal},
     task::JoinSet,
@@ -23,6 +24,48 @@ mod network_manager;
 
 #[cfg(feature = "digest")]
 mod digest;
+
+#[derive(Deserialize, Serialize)]
+pub struct BlehajServerResponse {
+    pub nonce: Vec<u8>,
+    pub ciphertext: Vec<u8>,
+    pub connection_configuration: Vec<u8>,
+    pub sig: Vec<u8>,
+}
+
+impl<'a> BlehajServerResponse {
+    pub fn configuration(&'a self) -> HashMap<&'a str, HashMap<&'a str, zbus::Variant<'a>>> {
+        rmp_serde::from_slice::<HashMap<&'a str, HashMap<&'a str, zbus::Variant<'a>>>>(
+            &self.connection_configuration,
+        )
+        .expect("deserialize connection_configuration broke")
+    }
+
+    #[cfg(feature = "digest")]
+    pub fn validate(&self, verifying_key: &ed25519_dalek::VerifyingKey) -> bool {
+        let message: Vec<u8> = [
+            self.nonce.clone(),
+            self.ciphertext.clone(),
+            self.connection_configuration.clone(),
+        ]
+        .concat();
+        match ed25519_dalek::Signature::from_slice(&self.sig) {
+            Ok(signature) => {
+                if let Err(e) = verifying_key.verify_strict(&message, &signature) {
+                    error!(%e, "signature verification failed");
+                    return false;
+                }
+            }
+
+            Err(e) => {
+                error!(%e, "failed to create signature");
+                return false;
+            }
+        }
+
+        true
+    }
+}
 
 #[tokio::main]
 async fn main() -> miette::Result<()> {
@@ -143,7 +186,7 @@ async fn main() -> miette::Result<()> {
 
     // Todo - This should actually be configurable
     let configuration_source =
-        BlePeripheralConfigurationSource::new_from_configuration(configuration)
+        BlePeripheralConfigurationSource::new_from_configuration(configuration.clone())
             .await
             .into_diagnostic()?;
 
@@ -206,12 +249,31 @@ async fn main() -> miette::Result<()> {
                 Some(Ok(Ok(None))) => {
                     debug!("task completed without returning configuration");
                 }
-                Some(Ok(Ok(Some(configuration_bytes)))) => {
-                    debug!("deserializing configuration json");
-                    match serde_json::from_slice::<HashMap<&str, HashMap<&str, zbus::Variant<'_>>>>(
-                        &configuration_bytes,
-                    ) {
-                        Ok(connection_settings) => {
+                Some(Ok(Ok(Some(bytes)))) => {
+                    debug!("deserializing configuration msgpack");
+                    match rmp_serde::from_slice::<BlehajServerResponse>(&bytes) {
+                        Ok(response) => {
+                            if !response.nonce.is_empty() || !response.ciphertext.is_empty() {
+                                panic!("encrypted response, haven't done that yet")
+                            }
+
+                            #[cfg(feature = "digest")]
+                            if !response.sig.is_empty() {
+                                debug!(
+                                    response.sig = hex::encode(&response.sig),
+                                    "response signature"
+                                );
+
+                                if let Some(verifying_key) = (configuration.clone()).verifying_key {
+                                    debug!("verifying signature");
+                                    if !response.validate(&verifying_key) {
+                                        continue;
+                                    }
+                                }
+                            }
+
+                            let connection_settings = response.configuration();
+
                             // Unpack into connection settings, and fix the data type of the SSID.
                             let connection_settings =
                                 if *connection_settings["802-11-wireless"]["ssid"].value_signature()
@@ -289,7 +351,7 @@ async fn main() -> miette::Result<()> {
                             }
                         }
                         Err(e) => {
-                            error!(%e, utf8 = str::from_utf8(&configuration_bytes).unwrap_or("(error decoding to utf8)"), "deserialization error");
+                            error!(%e, utf8 = str::from_utf8(&bytes).unwrap_or("(error)"), "deserialization error");
                         }
                     }
                 }

@@ -26,6 +26,9 @@ mod network_manager;
 #[cfg(feature = "digest")]
 mod digest;
 
+#[cfg(feature = "ml-kem")]
+use ml_kem::{Decapsulate, Kem, MlKem768};
+
 #[derive(Deserialize, Serialize)]
 pub struct BlehajServerResponse {
     pub nonce: Vec<u8>,
@@ -35,13 +38,6 @@ pub struct BlehajServerResponse {
 }
 
 impl<'a> BlehajServerResponse {
-    pub fn configuration(&'a self) -> HashMap<&'a str, HashMap<&'a str, zbus::Variant<'a>>> {
-        rmp_serde::from_slice::<HashMap<&'a str, HashMap<&'a str, zbus::Variant<'a>>>>(
-            &self.connection_configuration,
-        )
-        .expect("deserialize connection_configuration broke")
-    }
-
     #[cfg(feature = "digest")]
     pub fn validate(&self, verifying_key: &ed25519_dalek::VerifyingKey) -> bool {
         let message: Vec<u8> = [
@@ -184,12 +180,19 @@ async fn main() -> miette::Result<()> {
     // Do the stuff that can fail and would make the service unable to continue
     // to function, as configured, if it does fail.
     //
+    #[cfg(feature = "ml-kem")]
+    let (decapuslation_key, encapsulation_key) = {
+        let (dk, ek) = MlKem768::generate_keypair(); // These zeroize
+        (dk, Arc::new(ek))
+    };
 
     // Todo - This should actually be configurable
-    let configuration_source =
-        BlePeripheralConfigurationSource::new_from_configuration(configuration.clone())
-            .await
-            .into_diagnostic()?;
+    let configuration_source = BlePeripheralConfigurationSource::new_from_configuration(
+        configuration.clone(),
+        encapsulation_key,
+    )
+    .await
+    .into_diagnostic()?;
 
     //
     // Listen for signals
@@ -254,10 +257,6 @@ async fn main() -> miette::Result<()> {
                     debug!("deserializing configuration msgpack");
                     match rmp_serde::from_slice::<BlehajServerResponse>(&bytes) {
                         Ok(response) => {
-                            if !response.nonce.is_empty() || !response.ciphertext.is_empty() {
-                                panic!("encrypted response, haven't done that yet")
-                            }
-
                             #[cfg(feature = "digest")]
                             if !response.sig.is_empty() {
                                 debug!(
@@ -273,7 +272,39 @@ async fn main() -> miette::Result<()> {
                                 }
                             }
 
-                            let connection_settings = response.configuration();
+                            let configuration_bytes = response.connection_configuration;
+
+                            #[cfg(feature = "ml-kem")]
+                            let configuration_bytes = if !response.nonce.is_empty()
+                                || !response.ciphertext.is_empty()
+                            {
+                                use aes_gcm::{
+                                    AeadCore, Aes256Gcm, AesGcm,
+                                    aead::{Aead, KeyInit, Nonce},
+                                };
+
+                                let shared_secret = decapuslation_key
+                                    .decapsulate_slice(&response.ciphertext)
+                                    .unwrap();
+                                debug!(shared_secret = hex::encode(shared_secret), "decrypting");
+                                let cipher = Aes256Gcm::new(&shared_secret);
+                                let nonce: Nonce<AesGcm> =
+                                    Nonce::from_ref(response.nonce.iter().as_ref());
+                                // let nonce = Nonce::from_slice(&response.nonce);
+                                // Nonce::try_from(response.nonce).expect("nonce was broken");
+                                cipher
+                                    .decrypt(nonce, response.ciphertext.as_ref())
+                                    .expect("decrptying broke")
+                            } else {
+                                configuration_bytes
+                            };
+
+                            let connection_settings = {
+                                rmp_serde::from_slice::<
+                                    HashMap<&str, HashMap<&str, zbus::Variant<>>>,
+                                >(&configuration_bytes)
+                                .expect("deserialize connection_configuration broke")
+                            };
 
                             // Unpack into connection settings, and fix the data type of the SSID.
                             let connection_settings =

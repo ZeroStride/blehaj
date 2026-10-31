@@ -32,6 +32,13 @@ impl TryInto<Vec<u8>> for BleChonk {
     }
 }
 
+impl TryFrom<Vec<u8>> for BleChonk {
+    type Error = rmp_serde::decode::Error;
+    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+        rmp_serde::from_slice(&bytes)
+    }
+}
+
 impl BleChonk {
     pub fn is_start_of_frame(&self) -> bool {
         (self.flags & CHONK_FLAG_SOF) > 0

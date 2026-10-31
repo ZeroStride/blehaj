@@ -16,7 +16,7 @@ use derive_more::Debug;
 #[cfg(feature = "digest")]
 use ed25519_dalek::Signer;
 #[cfg(feature = "ml-kem")]
-use ml_kem::{DecapsulationKey768, Kem, MlKem768};
+use ml_kem::{EncapsulationKey768, KeyExport};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, mpsc::Receiver, oneshot::Sender};
 use tokio_util::{future::FutureExt, sync::CancellationToken};
@@ -75,10 +75,8 @@ impl TryInto<Vec<u8>> for Envelope {
 
 #[derive(Default)]
 struct ClientContext {
-    #[cfg(feature = "ml-kem")]
-    pub private_key: Option<DecapsulationKey768>,
-
     pub pending_read_chonks: Option<Vec<BleChonk>>,
+    pub pending_write_chonks: Option<Vec<BleChonk>>,
 }
 
 pub struct BlePeripheralConfigurationSource {
@@ -90,12 +88,15 @@ pub struct BlePeripheralConfigurationSource {
     configuration: Arc<configuration::Configuration>,
     context: HashMap<String, ClientContext>,
     chonker: Chonker,
+    #[cfg(feature = "ml-kem")]
+    encapsulation_key: Arc<EncapsulationKey768>,
 }
 
 impl BlePeripheralConfigurationSource {
     #[instrument]
     pub async fn new_from_configuration(
         configuration: Arc<configuration::Configuration>,
+        encapsulation_key: Arc<EncapsulationKey768>,
     ) -> Result<Self, ble_peripheral_rust::error::Error> {
         //bluer::Error> {
         // info!("initializing bluetooth session");
@@ -138,6 +139,7 @@ impl BlePeripheralConfigurationSource {
             configuration,
             context: HashMap::new(),
             chonker: Chonker::new(512),
+            encapsulation_key,
         })
     }
 
@@ -165,23 +167,12 @@ impl BlePeripheralConfigurationSource {
         {
             context.pending_read_chonks.as_mut().unwrap().pop().unwrap()
         } else {
-            #[cfg(feature = "ml-kem")]
-            let public_key = {
-                use ml_kem::KeyExport;
-
-                let (dk, ek) = MlKem768::generate_keypair(); // These zeroize
-                context.private_key = Some(dk);
-                let public_key = ek.to_bytes();
-                debug!(len = public_key.len(), "encapsulation key generated");
-                public_key.to_vec()
-            };
-
             let configuration_request = Envelope {
                 identifier: Uuid::new_v4().to_string(),
                 algorithm: "ed25519".to_owned(),
                 request: Request::NetworkManagerConfiguration {
                     #[cfg(feature = "ml-kem")]
-                    public_key,
+                    public_key: self.encapsulation_key.to_bytes().to_vec(),
                     interface: self.configuration.network_interface.clone(),
                 },
             };
@@ -266,22 +257,90 @@ impl BlePeripheralConfigurationSource {
         value: Vec<u8>,
         responder: Sender<WriteRequestResponse>,
     ) -> Option<Vec<u8>> {
-        debug!("received data from write_request");
+        // debug!("received data from write_request");
 
-        // Max size is 512 bytes (MTU for Bluetooth) * 5 (better ratio than zstd could hope for)
-        let (ret, response) = match bulk::decompress(&value, 512 * 5) {
-            Ok(output) => (Some(output), RequestResponse::Success),
-            Err(e) => {
-                error!(%e, "zstd decompression failed");
-                (None, RequestResponse::UnlikelyError)
+        match TryInto::<BleChonk>::try_into(value) {
+            Ok(chonk) => {
+                // Confirm the write
+                if responder
+                    .send(WriteRequestResponse {
+                        response: RequestResponse::Success,
+                    })
+                    .is_err()
+                {
+                    error!("error sending write_request response, receiver dropped");
+                }
+
+                let data = if chonk.is_start_of_frame() && chonk.is_end_of_frame() {
+                    Some(chonk.data)
+                } else {
+                    let context = {
+                        if !self.context.contains_key(&request.client) {
+                            warn!(
+                                client = request.client,
+                                "no pre-existing client context; this is almost certainly going to result in an encryption error very shortly"
+                            );
+                            self.context
+                                .insert(request.client.clone(), ClientContext::default());
+                        }
+                        self.context.get_mut(&request.client).unwrap()
+                    };
+
+                    let last_chonk = chonk.is_end_of_frame();
+                    let chonks: &Vec<BleChonk> = if chonk.is_start_of_frame() {
+                        trace!(?chonk, "this is the first chonk");
+                        if chonk.is_end_of_frame() {
+                            trace!(?chonk, "this is the last chonk");
+                            &vec![chonk]
+                        } else {
+                            // trace!(?chonk, "there are more chonks");
+                            context.pending_write_chonks = Some(vec![chonk]);
+                            context.pending_write_chonks.as_ref().unwrap()
+                        }
+                    } else {
+                        if last_chonk {
+                            trace!(?chonk, "this is the last chonk");
+                        } else {
+                            trace!(?chonk, "there are more chonks");
+                        }
+                        let chonks = context.pending_write_chonks.as_mut().unwrap();
+                        chonks.push(chonk);
+                        chonks
+                    };
+
+                    if last_chonk {
+                        let compresed: Vec<u8> = chonks.iter().fold(Vec::new(), |mut buffer, c| {
+                            trace!(chonk = ?c, "appending");
+                            buffer.extend_from_slice(&c.data);
+                            buffer
+                        });
+                        debug!(compressed_size = compresed.len(), "decompressing");
+                        Some(compresed)
+                    } else {
+                        None
+                    }
+                };
+
+                data.map(|compressed| {
+                    // Maximum value willing to allocate is len * 5, because there's no way zstd will hit 5x
+                    // but it's a reasonable amount of space to alloc still
+                    bulk::decompress(&compressed, compressed.len() * 5)
+                        .expect("decompression error")
+                })
             }
-        };
-
-        if responder.send(WriteRequestResponse { response }).is_err() {
-            error!("error sending write_request response, receiver dropped");
+            Err(e) => {
+                error!(%e, "error during dechonking");
+                if responder
+                    .send(WriteRequestResponse {
+                        response: RequestResponse::UnlikelyError,
+                    })
+                    .is_err()
+                {
+                    error!("error sending write_request response, receiver dropped");
+                }
+                None
+            }
         }
-
-        ret
     }
 
     #[instrument(skip(self))]

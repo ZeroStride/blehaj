@@ -15,6 +15,8 @@ use ble_peripheral_rust::{
 use derive_more::Debug;
 #[cfg(feature = "digest")]
 use ed25519_dalek::Signer;
+#[cfg(feature = "ml-kem")]
+use ml_kem::{DecapsulationKey768, Kem, MlKem768};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, mpsc::Receiver, oneshot::Sender};
 use tokio_util::{future::FutureExt, sync::CancellationToken};
@@ -33,6 +35,12 @@ const CONFIGURATION_CHARACTERISTIC_UUID: Uuid = uuid!("4b3bd2c3-2560-4353-8d37-0
 enum Request {
     NetworkManagerConfiguration {
         interface: String,
+
+        #[cfg(feature = "ml-kem")]
+        #[debug(skip)]
+        #[serde(with = "serde_bytes")]
+        public_key: Vec<u8>,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -67,6 +75,9 @@ impl TryInto<Vec<u8>> for Envelope {
 
 #[derive(Default)]
 struct ClientContext {
+    #[cfg(feature = "ml-kem")]
+    pub private_key: Option<DecapsulationKey768>,
+
     pub pending_read_chonks: Option<Vec<BleChonk>>,
 }
 
@@ -154,11 +165,23 @@ impl BlePeripheralConfigurationSource {
         {
             context.pending_read_chonks.as_mut().unwrap().pop().unwrap()
         } else {
+            #[cfg(feature = "ml-kem")]
+            let public_key = {
+                use ml_kem::KeyExport;
+
+                let (dk, ek) = MlKem768::generate_keypair(); // These zeroize
+                context.private_key = Some(dk);
+                let public_key = ek.to_bytes();
+                debug!(len = public_key.len(), "encapsulation key generated");
+                public_key.to_vec()
+            };
 
             let configuration_request = Envelope {
                 identifier: Uuid::new_v4().to_string(),
                 algorithm: "ed25519".to_owned(),
                 request: Request::NetworkManagerConfiguration {
+                    #[cfg(feature = "ml-kem")]
+                    public_key,
                     interface: self.configuration.network_interface.clone(),
                 },
             };

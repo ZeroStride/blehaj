@@ -137,7 +137,7 @@ async fn main() -> miette::Result<()> {
     //
     // Establish D-Bus connection, catch some errors I've run into
     //
-    info!(interface = %configuration.network_interface, "connecting to D-Bus service org.freedesktop.NetworkManager");
+    debug!(interface = %configuration.network_interface, "connecting to D-Bus service org.freedesktop.NetworkManager");
     let network_manager = NetworkManager::new().await.map_err(|e| {
         // Shuld check e.to_string() == "failed to read from socket"
         if let network_manager::Error::ZbusSystemConnection { source: e } = e {

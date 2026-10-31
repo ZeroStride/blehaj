@@ -93,7 +93,7 @@ pub struct BlePeripheralConfigurationSource {
 }
 
 impl BlePeripheralConfigurationSource {
-    #[instrument]
+    #[instrument(skip(encapsulation_key))]
     pub async fn new_from_configuration(
         configuration: Arc<configuration::Configuration>,
         encapsulation_key: Arc<EncapsulationKey768>,
@@ -364,26 +364,34 @@ impl BlePeripheralConfigurationSource {
         debug!(?self.service, "adding service");
         self.peripheral.add_service(&self.service).await?;
 
-        info!(%self.service.uuid, "advertising service");
         self.peripheral
             .start_advertising("blehaj-todo-add-setting", &[self.service.uuid])
             .await?;
 
-        #[cfg(feature = "qrcode")]
-        if let Some(ref qr_code_url_prefix) = self.configuration.qr_code_url_prefix {
-            use qrcode_generator::{
-                Renderer,
-                qr::{Encoder, ErrorCorrection},
-            };
-            use url::Url;
+        cfg_select! {
+            feature = "qrcode" => {
+                if let Some(ref qr_code_url_prefix) = self.configuration.qr_code_url_prefix {
+                    use qrcode_generator::{
+                        Renderer,
+                        qr::{Encoder, ErrorCorrection},
+                    };
+                    use url::Url;
 
-            let url = Url::parse(format!("{}{}", qr_code_url_prefix, self.service.uuid).as_str())
-                .unwrap();
-            let symbol = Encoder::new(ErrorCorrection::Medium)
-                .encode_to_qr_text(&url)
-                .unwrap();
-            let renderer = Renderer::new(&symbol, 0);
-            info!(%url, "running...\n{:#}", renderer);
+                    let url =
+                        Url::parse(format!("{}{}", qr_code_url_prefix, self.service.uuid).as_str())
+                            .unwrap();
+                    let symbol = Encoder::new(ErrorCorrection::Medium)
+                        .encode_to_qr_text(&url)
+                        .unwrap();
+                    let renderer = Renderer::new(&symbol, 0);
+                    info!(uuid = %self.service.uuid, %url, "advertising service {}", renderer);
+                } else {
+                    info!(uuid = %self.service.uuid, "advertising service");
+                }
+            }
+            _ => {
+                info!(uuid = %self.service.uuid, "advertising service");
+            }
         }
 
         loop {

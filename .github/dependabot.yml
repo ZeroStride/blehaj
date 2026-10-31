@@ -1,7 +1,7 @@
 version: 2
 updates:
 - package-ecosystem: cargo
-  versioning-strategy: auto
+  versioning-strategy: increase
   directory: "/"
   schedule:
     interval: "daily"

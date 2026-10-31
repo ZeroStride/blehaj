@@ -18,6 +18,7 @@ use crate::{
 };
 
 mod ble_peripheral_configuration_source;
+mod chonker;
 mod configuration;
 mod error;
 mod network_manager;

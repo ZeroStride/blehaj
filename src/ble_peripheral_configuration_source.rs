@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use ble_peripheral_rust::{
     Peripheral, PeripheralImpl,
@@ -12,22 +12,27 @@ use ble_peripheral_rust::{
         service::Service,
     },
 };
+use derive_more::Debug;
 #[cfg(feature = "digest")]
 use ed25519_dalek::Signer;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, mpsc::Receiver, oneshot::Sender};
 use tokio_util::{future::FutureExt, sync::CancellationToken};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 use uuid::{Uuid, uuid};
 use zstd::bulk;
 
-use crate::configuration::{self};
+use crate::{
+    chonker::*,
+    configuration::{self},
+};
 
 const CONFIGURATION_CHARACTERISTIC_UUID: Uuid = uuid!("4b3bd2c3-2560-4353-8d37-05ca8333d01e");
 
 #[derive(Debug, Deserialize, Serialize)]
 enum Request {
-    NetworkManagerConfiguration { interface: String },
+    NetworkManagerConfiguration {
+        interface: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -60,6 +65,11 @@ impl TryInto<Vec<u8>> for Envelope {
     }
 }
 
+#[derive(Default)]
+struct ClientContext {
+    pub pending_read_chonks: Option<Vec<BleChonk>>,
+}
+
 pub struct BlePeripheralConfigurationSource {
     // session: bluer::Session,
     // adapter: bluer::Adapter,
@@ -67,6 +77,8 @@ pub struct BlePeripheralConfigurationSource {
     event_rx: Receiver<PeripheralEvent>,
     service: Service,
     configuration: Arc<configuration::Configuration>,
+    context: HashMap<String, ClientContext>,
+    chonker: Chonker,
 }
 
 impl BlePeripheralConfigurationSource {
@@ -113,6 +125,8 @@ impl BlePeripheralConfigurationSource {
                 }],
             },
             configuration,
+            context: HashMap::new(),
+            chonker: Chonker::new(512),
         })
     }
 
@@ -123,66 +137,97 @@ impl BlePeripheralConfigurationSource {
 
     #[instrument(skip(self, responder))]
     async fn read_request(
-        &self,
+        &mut self,
         request: PeripheralRequest,
         responder: Sender<ReadRequestResponse>,
     ) {
-        let configuration_request = Envelope {
-            identifier: Uuid::new_v4().to_string(),
-            algorithm: "ed25519".to_owned(),
-            request: Request::NetworkManagerConfiguration {
-                interface: self.configuration.network_interface.clone(),
-            },
+        let context = {
+            if !self.context.contains_key(&request.client) {
+                self.context
+                    .insert(request.client.clone(), ClientContext::default());
+            }
+            self.context.get_mut(&request.client).unwrap()
         };
-        debug!(response = ?configuration_request, "responding to read_request");
 
-        let value = cfg_select! {
-            feature = "digest" => {
-                if let Some(ref signing_key) = self.configuration.signing_key {
-                    let bytes_to_sign: Vec<u8> = configuration_request
-                        .try_into()
-                        .expect("serialization failed");
-                    match signing_key.try_sign(&bytes_to_sign) {
-                        Ok(sig) => {
-                            let sig = hex::encode(sig.to_bytes());
-                            debug!(sig, "signature");
-                            SignedPayload {
-                                signature: sig,
-                                payload: bytes_to_sign,
-                            }
-                        }
-                        Err(e) => {
-                            error!(%e, "error while signing payload");
-                            SignedPayload {
-                                signature: String::new(),
-                                payload: bytes_to_sign,
-                            }
-                        }
-                    }
-                } else {
-                    warn!("no signing key provided, responses are unsigned");
-                    SignedPayload {
-                        signature: String::new(),
-                        payload: configuration_request
+        let chonk = if context.pending_read_chonks.is_some()
+            && !context.pending_read_chonks.as_ref().unwrap().is_empty()
+        {
+            context.pending_read_chonks.as_mut().unwrap().pop().unwrap()
+        } else {
+
+            let configuration_request = Envelope {
+                identifier: Uuid::new_v4().to_string(),
+                algorithm: "ed25519".to_owned(),
+                request: Request::NetworkManagerConfiguration {
+                    interface: self.configuration.network_interface.clone(),
+                },
+            };
+            debug!(response = ?configuration_request, "responding to read_request");
+
+            let value = cfg_select! {
+                feature = "digest" => {
+                    if let Some(ref signing_key) = self.configuration.signing_key {
+                        let bytes_to_sign: Vec<u8> = configuration_request
                             .try_into()
-                            .expect("serialization failed"),
+                            .expect("serialization failed");
+                        match signing_key.try_sign(&bytes_to_sign) {
+                            Ok(sig) => {
+                                let sig = hex::encode(sig.to_bytes());
+                                debug!(sig, "signature");
+                                SignedPayload {
+                                    signature: sig,
+                                    payload: bytes_to_sign,
+                                }
+                            }
+                            Err(e) => {
+                                error!(%e, "error while signing payload");
+                                SignedPayload {
+                                    signature: String::new(),
+                                    payload: bytes_to_sign,
+                                }
+                            }
+                        }
+                    } else {
+                        warn!("no signing key provided, responses are unsigned");
+                        SignedPayload {
+                            signature: String::new(),
+                            payload: configuration_request
+                                .try_into()
+                                .expect("serialization failed"),
+                        }
                     }
                 }
+                _ => BleEnvelope {
+                    signature: String::new(),
+                    request: configuration_request
+                        .try_into()
+                        .expect("serialization failed"),
+                },
+            };
+
+            let value: Vec<u8> = value.try_into().expect("serialization failed");
+            let value = bulk::compress(&value, 0).expect("zstd compression failed");
+            debug!(len = value.len(), "chonking compressed response");
+
+            let mut chonks = self.chonker.chonk_data(&value);
+            let chonk = chonks.pop().unwrap();
+            if !chonks.is_empty() {
+                context.pending_read_chonks = Some(chonks);
             }
-            _ => BleEnvelope {
-                signature: String::new(),
-                request: configuration_request
-                    .try_into()
-                    .expect("serialization failed"),
-            },
+            chonk
         };
 
-        let value: Vec<u8> = value.try_into().expect("serialization failed");
-        let value = bulk::compress(&value, 0).expect("zstd compression failed");
-        debug!(len = value.len(), "writing compressed response");
+        debug!(
+            len = &chonk.data.len(),
+            is_starting_chonk = &chonk.is_start_of_frame(),
+            is_final_chonk = &chonk.is_end_of_frame(),
+            "sending chonk"
+        );
+        trace!(?chonk, "chonk");
+
         if responder
             .send(ReadRequestResponse {
-                value,
+                value: chonk.try_into().expect("serialization failed"),
                 response: RequestResponse::Success,
             })
             .is_err()
@@ -259,7 +304,7 @@ impl BlePeripheralConfigurationSource {
             info!(%url, "running...\n{:#}", renderer);
         }
 
-        let result = loop {
+        loop {
             if let Some(event) = self
                 .event_rx
                 .recv()
@@ -298,10 +343,9 @@ impl BlePeripheralConfigurationSource {
                         }
                     }
                 }
+            } else {
+                break Ok(None);
             }
-        };
-        let _ = self.peripheral.stop_advertising().await;
-        drop(self.peripheral);
-        result
+        }
     }
 }

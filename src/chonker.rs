@@ -18,7 +18,7 @@ impl Debug for BleChonk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         f.debug_struct("BleChonk")
             .field("is_start_of_frame", &self.is_start_of_frame())
-            .field("is_end_of_frame", &self.is_start_of_frame())
+            .field("is_end_of_frame", &self.is_end_of_frame())
             .field("data.len", &self.data.len())
             .finish()
     }

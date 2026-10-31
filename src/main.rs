@@ -8,7 +8,7 @@ use tokio::{
     task::JoinSet,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{filter::EnvFilter, prelude::*};
 use zbus::Signature;
 
@@ -37,7 +37,7 @@ pub struct BlehajServerResponse {
     pub sig: Vec<u8>,
 }
 
-impl<'a> BlehajServerResponse {
+impl BlehajServerResponse {
     #[cfg(feature = "digest")]
     pub fn validate(&self, verifying_key: &ed25519_dalek::VerifyingKey) -> bool {
         let message: Vec<u8> = [
@@ -254,50 +254,75 @@ async fn main() -> miette::Result<()> {
                     debug!("task completed without returning configuration");
                 }
                 Some(Ok(Ok(Some(bytes)))) => {
-                    debug!("deserializing configuration msgpack");
                     match rmp_serde::from_slice::<BlehajServerResponse>(&bytes) {
                         Ok(response) => {
+                            debug!(
+                                nonce.len = response.nonce.len(),
+                                ciphertext.len = response.ciphertext.len(),
+                                connection_configuration.len =
+                                    response.connection_configuration.len(),
+                                sig.len = response.sig.len(),
+                                "deserialized reply"
+                            );
+
                             #[cfg(feature = "digest")]
                             if !response.sig.is_empty() {
-                                debug!(
+                                use tracing::trace;
+
+                                trace!(
                                     response.sig = hex::encode(&response.sig),
                                     "response signature"
                                 );
 
-                                if let Some(verifying_key) = (configuration.clone()).verifying_key {
-                                    debug!("verifying signature");
-                                    if !response.validate(&verifying_key) {
-                                        continue;
-                                    }
+                                if let Some(verifying_key) = (configuration.clone()).verifying_key
+                                    && !response.validate(&verifying_key)
+                                {
+                                    continue;
                                 }
                             }
 
                             let configuration_bytes = response.connection_configuration;
 
                             #[cfg(feature = "ml-kem")]
-                            let configuration_bytes = if !response.nonce.is_empty()
-                                || !response.ciphertext.is_empty()
-                            {
-                                use aes_gcm::{
-                                    AeadCore, Aes256Gcm, AesGcm,
-                                    aead::{Aead, KeyInit, Nonce},
-                                };
+                            let configuration_bytes =
+                                if !response.nonce.is_empty() || !response.ciphertext.is_empty() {
+                                    use aes_gcm::{
+                                        Aes256Gcm,
+                                        aead::{Aead, KeyInit, Payload},
+                                    };
 
-                                let shared_secret = decapuslation_key
-                                    .decapsulate_slice(&response.ciphertext)
-                                    .unwrap();
-                                debug!(shared_secret = hex::encode(shared_secret), "decrypting");
-                                let cipher = Aes256Gcm::new(&shared_secret);
-                                let nonce: Nonce<AesGcm> =
-                                    Nonce::from_ref(response.nonce.iter().as_ref());
-                                // let nonce = Nonce::from_slice(&response.nonce);
-                                // Nonce::try_from(response.nonce).expect("nonce was broken");
-                                cipher
-                                    .decrypt(nonce, response.ciphertext.as_ref())
-                                    .expect("decrptying broke")
-                            } else {
-                                configuration_bytes
-                            };
+                                    let shared_secret = decapuslation_key
+                                        .decapsulate_slice(&response.ciphertext)
+                                        .unwrap();
+
+                                    let cipher = Aes256Gcm::new(&shared_secret);
+                                    let nonce = match (&response.nonce[0..12]).try_into() {
+                                        Ok(nonce) => nonce,
+                                        Err(e) => {
+                                            error!(%e, "error while creating nonce");
+                                            todo!("unrecoverable, gotta start over")
+                                        }
+                                    };
+
+                                    let bytes: &[u8] = &configuration_bytes;
+                                    let payload: Payload = bytes.into();
+                                    trace!(
+                                        shared_secret = hex::encode(shared_secret),
+                                        payload.msg = payload.msg.len(),
+                                        payload.aad = payload.aad.len(),
+                                        "decrypting payload"
+                                    );
+
+                                    match cipher.decrypt(nonce, payload) {
+                                        Ok(decrypted) => decrypted,
+                                        Err(e) => {
+                                            error!(%e, "error while decrypting");
+                                            todo!("unrecoverable, gotta start over")
+                                        }
+                                    }
+                                } else {
+                                    configuration_bytes
+                                };
 
                             let connection_settings = {
                                 rmp_serde::from_slice::<
